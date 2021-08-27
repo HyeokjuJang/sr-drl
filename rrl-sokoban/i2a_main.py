@@ -1,3 +1,6 @@
+import sys
+sys.path.append("./common")
+
 import numpy as np
 import gym, gym_sokoban, torch
 
@@ -188,52 +191,71 @@ def trace_net(net, net_name, steps=100):
 		net.train()
 
 def env_pretrain(net, split='valid', subset=None):
+	from common.environment_model import EnvModelSokoban as EnvModel
+
 	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split=split, subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
 	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
+	
+	net.eval()
 
-	with torch.no_grad():
-		net.eval()
+	r_tot = 0.
+	problems_solved = 0
+	problems_finished = 0
+	steps = 0
+	reward_coef = 0.1
 
-		r_tot = 0.
-		problems_solved = 0
-		problems_finished = 0
-		steps = 0
+	s = test_env.reset()
+	input_state = test_env.raw_state()
+	input_state_shape = input_state.shape
+	
+	num_pixels = int(input_state_shape[1])
+	env_model = EnvModel(input_state_shape[1:4], num_pixels, 1)
+	criterion = torch.nn.CrossEntropyLoss()
+	optimizer = torch.optim.Adam(env_model.parameters())
 
-		s = test_env.reset()
-		input_state = test_env.raw_state()
-		input_state_shape = input_state.shape
+	while problems_finished < config.eval_problems:
+		steps += 1
+		input_state = torch.LongTensor(test_env.raw_state()) # arr_walls, arr_goals, arr_boxes, arr_player
 		
-		while problems_finished < config.eval_problems:
-			steps += 1
-			input_state = torch.tensor(test_env.raw_state()) # arr_walls, arr_goals, arr_boxes, arr_player
-			a, n, v, pi = net(s) # action, node, value, total_prob
-			
-			actions = to_action(a, n, s, size=config.soko_size)
-			
-			onehot_actions = torch.zeros((input_state_shape[0], 1, input_state_shape[2], input_state_shape[3]),dtype=int)
+		a, n, v, pi = net(s) # action, node, value, total_prob
 		
-			# action embedding
-			for i, action in enumerate(actions):
-				be_pos, be_a = action 
-				onehot_actions[i, 0, be_pos[1], be_pos[0]] = 5 if be_a == 0 else be_a
-			
-			input = torch.cat((input_state, onehot_actions), dim=1)
-			
-			
-			s, r, d, i = test_env.step(actions)
-			
-			# print(r)
-			r_tot += np.sum(r)
-			problems_solved   += sum('all_boxes_on_target' in x and x['all_boxes_on_target'] == True for x in i)
-			problems_finished += np.sum(d)
+		actions = to_action(a, n, s, size=config.soko_size)
+		
+		onehot_actions = np.zeros((input_state_shape[0], 1, input_state_shape[2], input_state_shape[3]))
+	
+		# action embedding
+		for i, action in enumerate(actions):
+			be_pos, be_a = action 
+			onehot_actions[i, 0, be_pos[1], be_pos[0]] = 5 if be_a == 0 else be_a
 
-			tqdm_val.update()
+		onehot_actions = torch.LongTensor(onehot_actions)
+		inputs = torch.cat([input_state, onehot_actions], dim=1)
+		
+		imagined_state, imagined_reward = env_model(inputs)
+		
+		s, r, d, i = test_env.step(actions)
 
-		r_avg = r_tot / (steps * config.eval_batch) # average reward per step
-		problems_solved_ps  = problems_solved / (steps * config.eval_batch)
-		problems_solved_avg = problems_solved / problems_finished
+		target_state = torch.LongTensor(test_env.raw_state())
+		optimizer.zero_grad()
+		image_loss  = criterion(imagined_state, target_state)
+		reward_loss = criterion(imagined_reward, r)
+		loss = image_loss + reward_coef * reward_loss
 
-		net.train()
+		loss.backward()
+		optimizer.step()
+		
+		# print(r)
+		r_tot += np.sum(r)
+		problems_solved   += sum('all_boxes_on_target' in x and x['all_boxes_on_target'] == True for x in i)
+		problems_finished += np.sum(d)
+
+		tqdm_val.update()
+
+	r_avg = r_tot / (steps * config.eval_batch) # average reward per step
+	problems_solved_ps  = problems_solved / (steps * config.eval_batch)
+	problems_solved_avg = problems_solved / problems_finished
+
+	net.train()
 
 	tqdm_val.close()
 	test_env.close()
