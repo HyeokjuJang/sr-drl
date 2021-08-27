@@ -62,7 +62,7 @@ class Net(Module):
 
             params_self[i].data.copy_(val_new)
 
-    def forward(self, s_batch, only_v=False, complete=False):
+    def graph_embedding(self, s_batch):
         # convert to tensors
         node_feats, edge_attr, edge_index, step_idx, used_indices = zip(*s_batch)
 
@@ -76,17 +76,26 @@ class Net(Module):
         # create batch
         data = [Data(x=node_feats[i], edge_attr=edge_attr[i], edge_index=edge_index[i]) for i in range( len(s_batch) )]
         data_lens = [x.num_nodes for x in data]
+        edge_lens = [x.num_edges for x in data]
         batch = Batch.from_data_list(data)
         batch_ind = batch.batch.to(self.device) # graph indices in the batch
 
         # embed features
         x, edge_attr, edge_index = batch.x, batch.edge_attr, batch.edge_index
+
         x = self.embed_node(x)
         # edge_attr = self.embed_edge(edge_attr)
+        return x, step_idx, data, edge_attr, edge_index, batch_ind, batch
+
+    def forward(self, s_batch, only_v=False, complete=False):
+        # graph embedded data
+        x, step_idx, data, edge_attr, edge_index, batch_ind, batch = self.graph_embedding(s_batch)
+
+        data_lens = [x.num_nodes for x in data]
 
         # push through graph
         x, xg = self.message_passing(x, step_idx, edge_attr, edge_index, batch_ind, batch.num_graphs)
-
+        
         # compute value function
         value = self.value_function(xg)
 
@@ -104,7 +113,7 @@ class Net(Module):
             a_expanded = a[batch_ind].view(-1, 1)               # a single action is performed for each graph 
             out_node = self.node_select(x)                      # node_select outputs actiovations for each action,
             node_activation = out_node.gather(1, a_expanded)    # hence here we select only the performed action
-
+            
             node_softmax = torch_geometric.utils.softmax(node_activation.flatten(), batch_ind)
             node_selected = segmented_sample(node_softmax, data_lens)
 
@@ -149,8 +158,8 @@ class Net(Module):
 
         if target_net is None:
             target_net = self
-
-        v_ = target_net(s_, only_v=True) * (1. - done)
+        f_ = target_net.graph_embedding(s_)
+        v_ = target_net(f_, only_v=True) * (1. - done)
 
         num_actions = torch.tensor([x[0].shape[0] * 5 for x in s_], dtype=torch.float32, device=self.device).reshape(-1, 1) # 5 actions per node
 
@@ -209,7 +218,7 @@ class GlobalNode(Module):
 
     def forward(self, xg_old, x, batch):
         xg = self.glob(x, batch)
-
+        
         xg = torch.cat([xg, xg_old], dim=1)
         xg = self.tranform(xg) + xg_old # skip connection
 

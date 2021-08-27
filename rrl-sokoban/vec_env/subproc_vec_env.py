@@ -27,6 +27,8 @@ def worker(remote, parent_remote, env_fn_wrappers):
                 break
             elif cmd == 'get_spaces_spec':
                 remote.send(CloudpickleWrapper((envs[0].observation_space, envs[0].action_space, envs[0].spec)))
+            elif cmd == 'raw_state':
+                remote.send([env.raw_state() for env in envs])
             else:
                 raise NotImplementedError
     except KeyboardInterrupt:
@@ -91,6 +93,14 @@ class SubprocVecEnv(VecEnv):
         self._assert_not_closed()
         for remote in self.remotes:
             remote.send(('reset', None))
+        obs = [remote.recv() for remote in self.remotes]
+        obs = _flatten_list(obs)
+        return _flatten_obs(obs)
+
+    def raw_state(self):
+        self._assert_not_closed()
+        for remote in self.remotes:
+            remote.send(('raw_state', None))
         obs = [remote.recv() for remote in self.remotes]
         obs = _flatten_list(obs)
         return _flatten_obs(obs)

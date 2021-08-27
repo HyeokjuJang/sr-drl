@@ -28,6 +28,8 @@ class GraphSokoban(gym.Env):
 
 			self.env = SokobanEnv(**kwargs, dim_room=soko_size, num_boxes=soko_boxes)
 
+		self.current_state = None
+
 
 # class GraphSokoban(SokobanEnv):
 # 	def __init__(self, **kwargs):
@@ -183,7 +185,7 @@ class GraphSokoban(gym.Env):
 		edge_feats, edge_index = self._create_edges(no_walls, len(no_walls_indices))
 
 		step_idx = self.env.num_env_steps / self.env.max_steps	# use the elementary step_idx!
-
+		
 		return n_feats, edge_feats, edge_index, step_idx, no_walls_indices
 
 	def step(self, action):
@@ -213,6 +215,7 @@ class GraphSokoban(gym.Env):
 
 			else:
 				s, r_tot, d, i = self.env.step(0)		 # if it's not possible do noop
+		
 
 		i['elementary_steps'] = self.env.num_env_steps - el_steps_start
 
@@ -228,16 +231,24 @@ class GraphSokoban(gym.Env):
 
 		i['s_true'] = s_true
 		i['d_true'] = d_true
-
+		
+		self.current_state = s # arr_walls, arr_goals, arr_boxes, arr_player
+		
 		return s_new, r_tot, d_new, i
 
 	def _raw_step(self, a):
-		return self.env.step(a)
+		s, r, d ,i = self.env.step(a)
+		self.current_state = s
+		
+		return s, r, d, i
+
+	def raw_state(self):
+		return self.current_state
 
 	def reset(self):
 		s = self.env.reset()
 		self.step_idx = 0
-
+		self.current_state = s
 		return self._to_graph(s)
 
 	def render(self, **kwargs):

@@ -227,10 +227,10 @@ if __name__ == '__main__':
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
 	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch}"
-	wandb.init(project="rrl-sokoban", name=job_name, config=config)
-	wandb.save("*.pt")
+	# wandb.init(project="rrl-sokoban", name=job_name, config=config)
+	# wandb.save("*.pt")
 
-	wandb.watch(net, log='all')
+	# wandb.watch(net, log='all')
 	# print(net)
 
 	tot_env_steps = 0
@@ -240,7 +240,8 @@ if __name__ == '__main__':
 	s = env.reset()
 
 	for step in itertools.count(start=1):
-		a, n, v, pi = net(s)
+		f = net.graph_embedding(s)
+		a, n, v, pi = net(f)
 		actions = to_action(a, n, s, size=config.soko_size)
 
 		# print(actions)
