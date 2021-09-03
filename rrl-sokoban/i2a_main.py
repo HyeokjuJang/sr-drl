@@ -47,8 +47,8 @@ def get_args():
 
 	# optimal cpu=2, device=cuda (rate 3.5)
 	parser = argparse.ArgumentParser()
-	parser.add_argument('-device', type=str, choices=['auto', 'cpu', 'cuda'] + cuda_devices, default='cpu', help="Which device to use")
-	parser.add_argument('-cpus', type=str, default='1', help="How many CPUs to use")
+	parser.add_argument('-device', type=str, choices=['auto', 'cpu', 'cuda'] + cuda_devices, default='cuda', help="Which device to use")
+	parser.add_argument('-cpus', type=str, default='4', help="How many CPUs to use")
 	parser.add_argument('-batch', type=int, default=256, help="Size of a batch / How many CPUs to use")
 	parser.add_argument('-seed', type=int, default=None, help="Random seed") # seed in multiprocessing is not implemented
 	parser.add_argument('-load_model', type=str, default=None, help="Load model from this file")
@@ -64,6 +64,10 @@ def get_args():
 	parser.add_argument('-eval', action='store_const', const=True, help="Evaluate the agent")
 	parser.add_argument('-env_pretrain', action='store_const', const=True, help="Pretrain env model")
 
+	parser.add_argument('--num_rollouts', type=int, default=5,
+                    help='num of rollouts for i2a algorithm')
+	parser.add_argument('--num_steps', type=int, default=32,
+                    help='num of steps for update')
 	cmd_args = parser.parse_args()
 
 	return cmd_args
@@ -190,17 +194,14 @@ def trace_net(net, net_name, steps=100):
 
 		net.train()
 
-def env_pretrain(net, split='valid', subset=None):
+def env_pretrain(net, tot_steps, subset=None, ):
 	from common.environment_model import EnvModelSokoban as EnvModel
 
-	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split=split, subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
-	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
+	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0',  subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
+	tqdm_val = tqdm(desc='Training', total=tot_steps, unit=' steps')
 	
 	net.eval()
 
-	r_tot = 0.
-	problems_solved = 0
-	problems_finished = 0
 	steps = 0
 	reward_coef = 0.1
 
@@ -210,60 +211,68 @@ def env_pretrain(net, split='valid', subset=None):
 	
 	num_pixels = int(input_state_shape[1])
 	env_model = EnvModel(input_state_shape[1:4], num_pixels, 1)
-	criterion = torch.nn.CrossEntropyLoss()
+	criterion = torch.nn.MSELoss()
 	optimizer = torch.optim.Adam(env_model.parameters())
 
-	while problems_finished < config.eval_problems:
+	losses = []
+
+	while steps < tot_steps:
 		steps += 1
-		input_state = torch.LongTensor(test_env.raw_state()) # arr_walls, arr_goals, arr_boxes, arr_player
+		input_state = torch.tensor(test_env.raw_state()) # arr_walls, arr_goals, arr_boxes, arr_player
 		
 		a, n, v, pi = net(s) # action, node, value, total_prob
 		
 		actions = to_action(a, n, s, size=config.soko_size)
 		
-		onehot_actions = np.zeros((input_state_shape[0], 1, input_state_shape[2], input_state_shape[3]))
+		onehot_actions = torch.zeros(input_state_shape[0], 1, input_state_shape[2], input_state_shape[3])
 	
 		# action embedding
 		for i, action in enumerate(actions):
 			be_pos, be_a = action 
 			onehot_actions[i, 0, be_pos[1], be_pos[0]] = 5 if be_a == 0 else be_a
 
-		onehot_actions = torch.LongTensor(onehot_actions)
-		inputs = torch.cat([input_state, onehot_actions], dim=1)
+		inputs = torch.autograd.Variable(torch.cat((input_state, onehot_actions), dim=1))
 		
 		imagined_state, imagined_reward = env_model(inputs)
 		
 		s, r, d, i = test_env.step(actions)
 
-		target_state = torch.LongTensor(test_env.raw_state())
+		target_state = torch.autograd.Variable(torch.tensor(test_env.raw_state(), dtype=torch.float))
+		target_reward = torch.autograd.Variable(torch.tensor(r, dtype=torch.float))
+			
 		optimizer.zero_grad()
 		image_loss  = criterion(imagined_state, target_state)
-		reward_loss = criterion(imagined_reward, r)
+		reward_loss = criterion(imagined_reward, target_reward)
 		loss = image_loss + reward_coef * reward_loss
-
+		
 		loss.backward()
 		optimizer.step()
-		
-		# print(r)
-		r_tot += np.sum(r)
-		problems_solved   += sum('all_boxes_on_target' in x and x['all_boxes_on_target'] == True for x in i)
-		problems_finished += np.sum(d)
+
+
+		losses.append(loss.item())
+        
+		if steps % 10000 == 0:
+			print('epoch %s. loss: %s' % (steps, losses[-1]))
 
 		tqdm_val.update()
 
-	r_avg = r_tot / (steps * config.eval_batch) # average reward per step
-	problems_solved_ps  = problems_solved / (steps * config.eval_batch)
-	problems_solved_avg = problems_solved / problems_finished
+	torch.save(env_model.state_dict(), "env_model_sokoban")
 
 	net.train()
 
 	tqdm_val.close()
 	test_env.close()
 
-	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
+	return env_model
 
 # ----------------------------------------------------------------------------------------
 if __name__ == '__main__':
+	from common.actor_critic import OnPolicy, ActorCritic, RolloutStorage
+	from common.environment_model import EnvModelSokoban as EnvModel
+	from common.i2a import ImaginationCore, I2A
+	import torch.optim as optim
+	import torch.nn.functional as F
+
 	args = get_args()
 	config.init(args)
 
@@ -281,59 +290,118 @@ if __name__ == '__main__':
 
 	torch.set_num_threads(config.cpus)	
 	
-	net = Net()
-	target_net = Net()
+	net = Net(inside_i2a=True)
+	target_net = Net(inside_i2a=True)
+
+	distil_policy = Net()
 
 	if config.load_model:
-		net.load(config.load_model)
-		target_net.load(config.load_model)
+		distil_policy.load(config.load_model)
 
 		print(f"Model loaded: {config.load_model}")
 
 	if args.trace:
-		trace_net(net, config.load_model)
+		trace_net(distil_policy, config.load_model)
 		exit(0)
 
 	if args.eval:
-		r_avg, s_ps_avg, s_avg, s_tot = evaluate(net)
+		r_avg, s_ps_avg, s_avg, s_tot = evaluate(distil_policy)
 		print(f"Avg. reward: {r_avg}, Avg. solved per step: {s_ps_avg}, Avg. solved: {s_avg}, Tot. finished: {s_tot}")
 		exit(0)
 
 	if args.env_pretrain:
 		print("start env model pre-training")
-		env_pretrain(net)
+		env_pretrain(distil_policy, 1e6)
 		exit(0)
 
-	env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
+	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
 	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch}"
-	# wandb.init(project="rrl-sokoban", name=job_name, config=config)
-	# wandb.save("*.pt")
+	wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
+	wandb.save("*.pt")
 
-	# wandb.watch(net, log='all')
+	wandb.watch(net, log='all')
 	# print(net)
+
+	USE_CUDA = torch.cuda.is_available()
+	Variable = lambda *args, **kwargs: torch.autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else torch.autograd.Variable(*args, **kwargs)
+
+	s = envs.reset()
+	input_state = envs.raw_state()
+	input_state_shape = input_state.shape
+	state_shape = input_state_shape[1:4]
+
+	num_pixels = int(input_state_shape[1])
+	env_model     = EnvModel(state_shape, num_pixels, 1)
+    
+	env_model.load_state_dict(torch.load("env_model_sokoban"))
+    
+	distil_optimizer = optim.Adam(net.parameters())
+	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
+	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs)
+	
+    #rmsprop hyperparams:
+	lr    = 7e-4
+	eps   = 1e-5
+	alpha = 0.99
+    #rmsprop
+    #optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
+    #adam:
+	optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
+
+	if USE_CUDA:
+		env_model     = env_model.cuda()
+		net = net.cuda()
+		target_net = target_net.cuda()
+		actor_critic  = actor_critic.cuda()
+		distil_policy = distil_policy.cuda()
+
+	gamma = 0.99
+	entropy_coef = 0.01
+	value_loss_coef = 0.5
+	max_grad_norm = 0.5
+	num_steps = args.num_steps
+	num_frames = int(10e6)
+
+	rollout = RolloutStorage(num_steps, config.batch, state_shape)
+	rollout.cuda()
 
 	tot_env_steps = 0
 	tot_el_env_steps = 0
 
 	tqdm_main = tqdm(desc='Training', unit=' steps')
-	s = env.reset()
+	s = envs.reset()
+	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 
 	for step in itertools.count(start=1):
-		f = net.graph_embedding(s)
-		a, n, v, pi = net(f)
+		a, n, v, pi = actor_critic(state_as_frame) # action, node, value, total_prob
 		actions = to_action(a, n, s, size=config.soko_size)
 
 		# print(actions)
-		s, r, d, i = env.step(actions)
+		s, r, d, i = envs.step(actions)
 
 		s_true = [x['s_true'] for x in i]
 		d_true = [x['d_true'] for x in i]
-
+		state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 		# update network
-		loss, loss_pi, loss_v, loss_h, entropy, norm = net.update(r, v, pi, s_true, d_true, target_net)
+		loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
 		target_net.copy_weights(net, rho=config.target_rho)
+
+		loss = loss - entropy * entropy_coef
+		optimizer.zero_grad()
+		loss.backward()
+		# clip the gradient norm
+		norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
+		optimizer.step()
+
+		# distillation
+		distil_logit = distil_policy.get_logit(r, v, pi.detach(), s_true, d_true)
+		
+		distil_loss = 0.01 * (F.softmax(logit, dim=0).detach() * F.log_softmax(Variable(distil_logit, requires_grad=True), dim=0)).sum(0).mean()
+		distil_optimizer.zero_grad()
+		distil_loss.backward()
+		distil_optimizer.step()
 
 		# save step stats
 		tot_env_steps += config.batch
@@ -352,9 +420,9 @@ if __name__ == '__main__':
 		if step % config.log_rate == 0:
 			log_step = step // config.log_rate
 
-			r_avg, s_ps_avg, s_avg, _ = evaluate(net)
-			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(net, split='train', subset=config.subset)
-			debug_net(net)
+			r_avg, s_ps_avg, s_avg, _ = evaluate(distil_policy)
+			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
+			debug_net(distil_policy)
 
 			log = {
 				'env_steps': tot_env_steps,
@@ -365,6 +433,7 @@ if __name__ == '__main__':
 				'loss_pi': loss_pi,
 				'loss_v': loss_v,
 				'loss_h': loss_h,
+				'distil_loss': distil_loss,
 				'entropy estimate': entropy,
 				'gradient norm': norm,
 
@@ -384,11 +453,12 @@ if __name__ == '__main__':
 			wandb.log(log)
 
 			# save model to wandb
-			net.save(os.path.join(wandb.run.dir, "model.pt"))
+			actor_critic.save(os.path.join(wandb.run.dir, "model_i2a.pt"))
+			distil_policy.save(os.path.join(wandb.run.dir, "model_distil.pt"))
 
 		# finish if max_epochs exceeded
 		if config.max_epochs and (step // config.log_rate >= config.max_epochs):
 			break
 
-	env.close()
+	envs.close()
 	tqdm_main.close()

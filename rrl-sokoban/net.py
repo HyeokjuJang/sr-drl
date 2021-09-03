@@ -15,17 +15,21 @@ def segmented_sample(probs, splits):
     return torch.cat(samples)
 
 class Net(Module):
-    def __init__(self):
+    def __init__(self, inside_i2a=False):
         super().__init__()
-
+        self.inside_i2a = inside_i2a
+        if self.inside_i2a:
+            self.inside_i2a = 2
+        else:
+            self.inside_i2a = 1
         self.embed_node = Sequential( Linear(5, config.emb_size), LeakyReLU() )
         # self.embed_edge = Sequential( Linear(4, config.emb_size), LeakyReLU() )
 
         self.message_passing = MultiMessagePassing(steps=config.mp_iterations)
 
         self.node_select = Linear(config.emb_size, 5) # node features -> node probability for all 5 actions
-        self.action_select = Linear(config.emb_size, 5)  # global features -> 5 actions
-        self.value_function = Linear(config.emb_size, 1) # global features -> state value
+        self.action_select = Linear(config.emb_size * self.inside_i2a, 5)  # global features -> 5 actions
+        self.value_function = Linear(config.emb_size * self.inside_i2a, 1) # global features -> state value
 
         self.opt = torch.optim.AdamW(self.parameters(), lr=config.opt_lr, weight_decay=config.opt_l2)
 
@@ -82,12 +86,12 @@ class Net(Module):
 
         # embed features
         x, edge_attr, edge_index = batch.x, batch.edge_attr, batch.edge_index
-
         x = self.embed_node(x)
+        
         # edge_attr = self.embed_edge(edge_attr)
         return x, step_idx, data, edge_attr, edge_index, batch_ind, batch
 
-    def forward(self, s_batch, only_v=False, complete=False):
+    def forward(self, s_batch, only_v=False, complete=False, imag_core_input=None):
         # graph embedded data
         x, step_idx, data, edge_attr, edge_index, batch_ind, batch = self.graph_embedding(s_batch)
 
@@ -95,7 +99,10 @@ class Net(Module):
 
         # push through graph
         x, xg = self.message_passing(x, step_idx, edge_attr, edge_index, batch_ind, batch.num_graphs)
-        
+        # xg.shape = [64, 64]
+        # if inside_i2a then make concat tensor with imag_core_input
+        if self.inside_i2a == 2 and imag_core_input != None:
+            xg = torch.cat((xg, imag_core_input), dim=1)
         # compute value function
         value = self.value_function(xg)
 
@@ -149,7 +156,7 @@ class Net(Module):
         n_prob = node_softmax[n_index].view(-1, 1)
 
         tot_prob = a_prob * n_prob
-
+        
         return action_selected, node_selected, value, tot_prob
 
     def update(self, r, v, pi, s_, done, target_net=None):
@@ -158,9 +165,8 @@ class Net(Module):
 
         if target_net is None:
             target_net = self
-        f_ = target_net.graph_embedding(s_)
-        v_ = target_net(f_, only_v=True) * (1. - done)
-
+        v_ = target_net(s_, only_v=True) * (1. - done)
+       
         num_actions = torch.tensor([x[0].shape[0] * 5 for x in s_], dtype=torch.float32, device=self.device).reshape(-1, 1) # 5 actions per node
 
         loss, loss_pi, loss_v, loss_h, entropy = a2c(r, v, v_, pi, config.gamma, config.alpha_v, self.alpha_h, config.q_range, num_actions)
@@ -184,6 +190,22 @@ class Net(Module):
 
     def set_alpha_h(self, alpha_h):
         self.alpha_h = alpha_h
+    
+    def get_logit(self, r, v, pi, s_, done, target_net=None):
+        done = torch.tensor(done, dtype=torch.float32, device=self.device).view(-1, 1)
+        r = torch.tensor(r, dtype=torch.float32, device=self.device).view(-1, 1)
+
+        if target_net is None:
+            target_net = self
+        v_ = target_net(s_, only_v=True) * (1. - done)
+       
+        num_actions = torch.tensor([x[0].shape[0] * 5 for x in s_], dtype=torch.float32, device=self.device).reshape(-1, 1) # 5 actions per node
+
+        loss, loss_pi, loss_v, loss_h, entropy, logit = a2c(r, v, v_, pi, config.gamma, config.alpha_v, self.alpha_h, config.q_range, num_actions)
+
+        # for logging
+        return logit
+
 
 # ----------------------------------------------------------------------------------------
 class MultiMessagePassing(Module):

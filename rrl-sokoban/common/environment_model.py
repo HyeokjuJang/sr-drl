@@ -103,14 +103,14 @@ class EnvModelSokoban(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv2d(5, 32, kernel_size=1), #input channel is 5
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 16, kernel_size=3, padding=2),
+            nn.Conv2d(64, 16, kernel_size=3, padding=1),
             nn.ReLU(),
         )
 
         self.conv2 = nn.Sequential(
-            nn.Conv2d(16, 16, kernel_size=3, padding=2),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
             nn.ReLU()
         )
 
@@ -139,7 +139,8 @@ class EnvModelSokoban(nn.Module):
         x = self.conv1(inputs)
         c1o = x
         x = self.conv2(x)
-        x = torch.cat(c1o, x) # nx32x10x10
+        
+        x = torch.cat((c1o, x), dim=1) # nx32x10x10
 
         image = self.image_conv(x)
         # image = image.permute(0, 2, 3, 1).contiguous().view(-1, 256)
@@ -148,6 +149,6 @@ class EnvModelSokoban(nn.Module):
         reward = self.reward_conv(x)
         reward = reward.view(batch_size, -1)
         # reward = self.reward_fc(reward)
-        reward = torch.sum(reward, dim=0)
+        reward = torch.sum(reward, dim=1)
 
         return image, reward

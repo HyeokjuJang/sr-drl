@@ -175,7 +175,6 @@ class GraphSokoban(gym.Env):
 		# remove the walls
 		no_walls = walls == 0
 		no_walls_indices = np.argwhere(no_walls)
-
 		n_feats = n_feats[no_walls]
 
 		# flatten

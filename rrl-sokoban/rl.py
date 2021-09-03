@@ -11,6 +11,7 @@ def a2c(r, v, v_, pi, gamma, alpha_v, alpha_h, q_range=None, num_actions=None):
 
 	# compute losses
 	log_pi = torch.log(pi + 1e-9)	# bug fix in torch.multinomial: this should never be zero...
+	orig_log_pi = log_pi
 	q = r + gamma * v_.detach()
 
 	if q_range is not None:
@@ -39,9 +40,10 @@ def a2c(r, v, v_, pi, gamma, alpha_v, alpha_h, q_range=None, num_actions=None):
 
 	loss_pi  = torch.mean(loss_pi)
 	loss_v   = alpha_v * torch.mean(loss_v)
+	
 	loss_h   = alpha_h * torch.mean(loss_h)
 
 	loss = loss_pi + loss_v + loss_h
 
 	# print(f"{loss.item()=} {loss_pi=} {loss_v=} {loss_h=}")
-	return loss, loss_pi, loss_v, loss_h, entropy
+	return loss, loss_pi, loss_v, loss_h, entropy, orig_log_pi

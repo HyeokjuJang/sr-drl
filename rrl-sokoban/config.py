@@ -59,7 +59,7 @@ class Object:
 		self.q_range = (-15, 15)	# range of the Q function to help the optimization, can be None
 
 		self.max_epochs = args.max_epochs
-		self.log_rate = 1 * self.epoch
+		self.log_rate = 100 * self.epoch
 		self.eval_problems = 1000
 		# self.eval_steps = 500
 		self.eval_batch = 64

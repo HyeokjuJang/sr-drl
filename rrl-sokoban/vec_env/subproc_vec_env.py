@@ -11,6 +11,9 @@ def worker(remote, parent_remote, env_fn_wrappers):
             ob = env.reset()
         return ob, reward, done, info
 
+    def to_graph(env, state):
+        return env._to_graph(state)
+
     parent_remote.close()
     envs = [env_fn_wrapper() for env_fn_wrapper in env_fn_wrappers.x]
     try:
@@ -29,6 +32,8 @@ def worker(remote, parent_remote, env_fn_wrappers):
                 remote.send(CloudpickleWrapper((envs[0].observation_space, envs[0].action_space, envs[0].spec)))
             elif cmd == 'raw_state':
                 remote.send([env.raw_state() for env in envs])
+            elif cmd == 'to_graph':
+                remote.send([to_graph(env, state) for env, state in zip(envs, data)])
             else:
                 raise NotImplementedError
     except KeyboardInterrupt:
@@ -101,6 +106,14 @@ class SubprocVecEnv(VecEnv):
         self._assert_not_closed()
         for remote in self.remotes:
             remote.send(('raw_state', None))
+        obs = [remote.recv() for remote in self.remotes]
+        obs = _flatten_list(obs)
+        return _flatten_obs(obs)
+
+    def to_graph(self, s):
+        self._assert_not_closed()
+        for remote in self.remotes:
+            remote.send(('to_graph', s))
         obs = [remote.recv() for remote in self.remotes]
         obs = _flatten_list(obs)
         return _flatten_obs(obs)
