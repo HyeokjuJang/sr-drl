@@ -375,7 +375,7 @@ if __name__ == '__main__':
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 
 	for step in itertools.count(start=1):
-		a, n, v, pi = actor_critic(state_as_frame) # action, node, value, total_prob
+		a, n, v, pi = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
 		actions = to_action(a, n, s, size=config.soko_size)
 
 		# print(actions)

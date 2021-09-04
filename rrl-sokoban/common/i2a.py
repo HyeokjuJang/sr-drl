@@ -73,9 +73,14 @@ class I2A(OnPolicy):
             nn.ReLU(),
         )
         
-    def forward(self, state):
+    def forward(self, state, s=None):
         batch_size = state.shape[0]
         state_np = state.data.cpu().numpy()
+        if s is not None:
+            graph_state = s
+        else:
+            graph_state = self.envs.to_graph(state_np)
+        
 
         imagined_state, imagined_reward = self.imagination(state_np)
         hidden = self.encoder(Variable(imagined_state), Variable(imagined_reward))
@@ -87,7 +92,6 @@ class I2A(OnPolicy):
         x = torch.cat([state, hidden], 1)
         x = self.fc(x)
         
-        graph_state = self.envs.to_graph(state_np)
         action_selected, node_selected, value, tot_prob = self.net(graph_state, imag_core_input=x)
 
         # output shapes [batch_size], [batch_size], [batch_size, 1], [batch_size, 1]
