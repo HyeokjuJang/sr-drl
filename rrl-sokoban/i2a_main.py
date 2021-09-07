@@ -63,6 +63,7 @@ def get_args():
 	parser.add_argument('-trace', action='store_const', const=True, help="Show trace of the agent")
 	parser.add_argument('-eval', action='store_const', const=True, help="Evaluate the agent")
 	parser.add_argument('-env_pretrain', action='store_const', const=True, help="Pretrain env model")
+	parser.add_argument('-pretrained_env_test', action='store_const', const=True, help="test Pretrained env model")
 
 	parser.add_argument('--num_rollouts', type=int, default=5,
                     help='num of rollouts for i2a algorithm')
@@ -204,6 +205,7 @@ def env_pretrain(net, tot_steps, subset=None, ):
 
 	steps = 0
 	reward_coef = 0.1
+	num_actions = 5
 
 	s = test_env.reset()
 	input_state = test_env.raw_state()
@@ -224,13 +226,13 @@ def env_pretrain(net, tot_steps, subset=None, ):
 		
 		actions = to_action(a, n, s, size=config.soko_size)
 		
-		onehot_actions = torch.zeros(input_state_shape[0], 1, input_state_shape[2], input_state_shape[3])
+		onehot_actions = torch.zeros(input_state_shape[0], num_actions, input_state_shape[2], input_state_shape[3])
 	
 		# action embedding
 		for i, action in enumerate(actions):
 			be_pos, be_a = action 
-			onehot_actions[i, 0, be_pos[1], be_pos[0]] = 5 if be_a == 0 else be_a
-
+			onehot_actions[i, be_a, be_pos[1], be_pos[0]] = 1
+		
 		inputs = torch.autograd.Variable(torch.cat((input_state, onehot_actions), dim=1))
 		
 		imagined_state, imagined_reward = env_model(inputs)
@@ -261,6 +263,89 @@ def env_pretrain(net, tot_steps, subset=None, ):
 	net.train()
 
 	tqdm_val.close()
+	test_env.close()
+
+	return env_model
+
+def pretrained_env_test(net, tot_steps, subset=None, ):
+	from common.environment_model import EnvModelSokoban as EnvModel
+	import matplotlib.pyplot as plt
+	import time
+
+	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0',  subset=subset) for i in range(1)], context='fork')
+	
+	net.eval()
+
+	steps = 0
+	num_actions = 5
+
+	s = test_env.reset()
+	input_state = test_env.raw_state()
+	input_state_shape = input_state.shape
+	
+	num_pixels = int(input_state_shape[1])
+	env_model = EnvModel(input_state_shape[1:4], num_pixels, 1)
+	env_model.load_state_dict(torch.load("env_model_sokoban"))
+	
+	def target_to_pix(i_s):
+		pixels = []
+		# arr_walls, arr_goals, arr_boxes, arr_player
+		
+		for i in range(i_s.shape[1]):
+			for j in range(i_s.shape[2]):
+				if (i_s[:,i,j] == [1, 0, 0, 0]).all():
+					pixels.append((0, 0, 0))
+				elif (i_s[:,i,j] == [0, 0, 0, 0]).all():
+					pixels.append((243, 248, 238))
+				elif (i_s[:,i,j] == [0, 1, 0, 0]).all():
+					pixels.append((254, 126, 125))
+				elif (i_s[:,i,j] == [0, 0, 1, 0]).all():
+					pixels.append((254, 95, 56))
+				elif (i_s[:,i,j] == [0, 1, 1, 0]).all():
+					pixels.append((142, 121, 56))
+				elif (i_s[:,i,j] == [0, 0, 0, 1]).all():
+					pixels.append((160, 212, 56))
+				elif (i_s[:,i,j] == [0, 1, 0, 1]).all():
+					pixels.append((219, 212, 56))
+				else:
+					pixels.append((255, 255, 255))
+				
+		return np.array(pixels).reshape(10,10,3)
+
+	while steps < tot_steps:
+		steps += 1
+		input_state = torch.tensor(test_env.raw_state()) # arr_walls, arr_goals, arr_boxes, arr_player
+		
+		a, n, v, pi = net(s) # action, node, value, total_prob
+		
+		actions = to_action(a, n, s, size=config.soko_size)
+		
+		onehot_actions = torch.zeros(input_state_shape[0], num_actions, input_state_shape[2], input_state_shape[3])
+	
+		# action embedding
+		for i, action in enumerate(actions):
+			be_pos, be_a = action 
+			onehot_actions[i, be_a, be_pos[1], be_pos[0]] = 1
+		
+		inputs = torch.cat((input_state, onehot_actions), dim=1)
+		imagined_state, imagined_reward = env_model(inputs)
+		imagined_state = (imagined_state>0.5).int().reshape(4,10,10)
+		imagined_image = target_to_pix(imagined_state.data.cpu().numpy())
+		
+		s, r, d, i = test_env.step(actions)
+		state_image = target_to_pix(test_env.raw_state().reshape(4,10,10))
+		
+		
+		plt.figure(figsize=(10,3))
+		plt.subplot(121)
+		plt.title("Imagined")
+		plt.imshow(imagined_image)
+		plt.subplot(122)
+		plt.title("Actual")
+		plt.imshow(state_image)
+		plt.show()
+		time.sleep(0.3)
+
 	test_env.close()
 
 	return env_model
@@ -312,6 +397,11 @@ if __name__ == '__main__':
 	if args.env_pretrain:
 		print("start env model pre-training")
 		env_pretrain(distil_policy, 1e6)
+		exit(0)
+	
+	if args.pretrained_env_test:
+		print("test pre-trained env model")
+		pretrained_env_test(distil_policy, 1e4)
 		exit(0)
 
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')

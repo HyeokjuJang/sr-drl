@@ -132,7 +132,7 @@ class I2A(OnPolicy):
         torch.save(self.state_dict(), file)
 
 class ImaginationCore(object):
-    def __init__(self, num_rolouts, in_shape, env_model, distil_policy, soko_size, input_frame_shape, envs):
+    def __init__(self, num_rolouts, in_shape, env_model, distil_policy, soko_size, input_frame_shape, envs, num_actions=5):
         self.num_rolouts  = num_rolouts
         self.in_shape      = in_shape
         self.env_model     = env_model
@@ -140,6 +140,7 @@ class ImaginationCore(object):
         self.soko_size = soko_size
         self.input_frame_shape = input_frame_shape
         self.envs = envs
+        self.num_actions = num_actions
     
     def to_action(self, a, n, s, size):
         node_indices = [x[4] for x in s]
@@ -169,13 +170,13 @@ class ImaginationCore(object):
 
         # step action
         for step in range(self.num_rolouts):
-            onehot_actions = torch.zeros(batch_size, 1, self.in_shape[1], self.in_shape[2])
+            onehot_actions = torch.zeros(batch_size, self.num_actions, self.in_shape[1], self.in_shape[2])
 	
             # action embedding
             for i, action in enumerate(actions):
                 be_pos, be_a = action 
-                onehot_actions[i, 0, be_pos[1], be_pos[0]] = 5 if be_a == 0 else be_a
-
+                onehot_actions[i, be_a, be_pos[1], be_pos[0]] = 1
+            
             inputs = torch.autograd.Variable(torch.cat((torch.tensor(state), onehot_actions), dim=1))
             
             with torch.no_grad():
