@@ -91,7 +91,7 @@ def evaluate(net, split='valid', subset=None):
 		while problems_finished < config.eval_problems:
 			steps += 1
 
-			a, n, v, pi = net(s)
+			a, n, v, pi, _, _ = net(s)
 			actions = to_action(a, n, s, size=config.soko_size)
 
 			s, r, d, i = test_env.step(actions)
@@ -407,7 +407,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-20210913"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-action-node-saparate-20210913"
 	wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
 	wandb.save("*.pt")
 
