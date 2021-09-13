@@ -165,7 +165,7 @@ class ImaginationCore(object):
         # pick action
         graph_state = self.envs.to_graph(state)
         with torch.no_grad():
-            a, n, v, pi = self.distil_policy(graph_state)
+            a, n, v, pi, _, _ = self.distil_policy(graph_state)
         actions = self.to_action(a, n, graph_state, size=self.soko_size)
 
         # step action
@@ -199,7 +199,7 @@ class ImaginationCore(object):
             # pick action
             graph_state = self.envs.to_graph(state.numpy())
             with torch.no_grad():
-                a, n, v, pi = self.distil_policy(graph_state)
+                a, n, v, pi, _, _ = self.distil_policy(graph_state)
             actions = self.to_action(a, n, graph_state, size=self.soko_size)
         
         return torch.cat(rollout_states), torch.cat(rollout_rewards)
