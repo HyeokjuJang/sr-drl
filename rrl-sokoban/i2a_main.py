@@ -407,7 +407,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch}"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_fixed"
 	wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
 	wandb.save("*.pt")
 
@@ -465,7 +465,8 @@ if __name__ == '__main__':
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 
 	for step in itertools.count(start=1):
-		a, n, v, pi = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
+		a, n, v, pi, a_p, n_p = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
+		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
 		actions = to_action(a, n, s, size=config.soko_size)
 
 		# print(actions)
@@ -486,9 +487,10 @@ if __name__ == '__main__':
 		optimizer.step()
 
 		# distillation
-		distil_logit = distil_policy.get_logit(r, v, pi.detach(), s_true, d_true)
-		
-		distil_loss = 0.01 * (F.softmax(logit, dim=0).detach() * F.log_softmax(Variable(distil_logit, requires_grad=True), dim=0)).sum(0).mean()
+		distil_loss_action = (a_p.detach() * Variable(a_p_d, requires_grad=True)).sum(0).mean()
+		distil_loss_node = (n_p.detach() * Variable(n_p_d, requires_grad=True)).sum(0).mean()
+		distil_loss_value = (v.detach() * Variable(v_d, requires_grad=True)).sum(0).mean()
+		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
 		distil_optimizer.zero_grad()
 		distil_loss.backward()
 		distil_optimizer.step()

@@ -240,8 +240,7 @@ if __name__ == '__main__':
 	s = env.reset()
 
 	for step in itertools.count(start=1):
-		f = net.graph_embedding(s)
-		a, n, v, pi = net(f)
+		a, n, v, pi = net(s)
 		actions = to_action(a, n, s, size=config.soko_size)
 
 		# print(actions)

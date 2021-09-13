@@ -92,10 +92,10 @@ class I2A(OnPolicy):
         x = torch.cat([state, hidden], 1)
         x = self.fc(x)
         
-        action_selected, node_selected, value, tot_prob = self.net(graph_state, imag_core_input=x)
+        action_selected, node_selected, value, tot_prob, a_p, n_p = self.net(graph_state, imag_core_input=x)
 
         # output shapes [batch_size], [batch_size], [batch_size, 1], [batch_size, 1]
-        return action_selected, node_selected, value, tot_prob
+        return action_selected, node_selected, value, tot_prob, a_p, n_p
         
     def feature_size(self):
         return self.features(autograd.Variable(torch.zeros(1, *self.in_shape))).view(1, -1).size(1)

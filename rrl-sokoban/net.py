@@ -157,7 +157,7 @@ class Net(Module):
 
         tot_prob = a_prob * n_prob
         
-        return action_selected, node_selected, value, tot_prob
+        return action_selected, node_selected, value, tot_prob, a_prob, n_prob
 
     def update(self, r, v, pi, s_, done, target_net=None):
         done = torch.tensor(done, dtype=torch.float32, device=self.device).view(-1, 1)
