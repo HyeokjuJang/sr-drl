@@ -489,7 +489,7 @@ if __name__ == '__main__':
 		# distillation
 		distil_loss_action = 0.01 * (a_p.detach() * torch.log(Variable(a_p_d, requires_grad=True))).sum(0).mean()
 		distil_loss_node = 0.01 * (n_p.detach() * torch.log(Variable(n_p_d, requires_grad=True))).sum(0).mean()
-		distil_loss_value = (v.detach() - Variable(v_d, requires_grad=True)).sum(0).mean()
+		distil_loss_value = F.mse_loss(Variable(v_d, requires_grad=True), v.detach())
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
 		distil_optimizer.zero_grad()
 		distil_loss.backward()
