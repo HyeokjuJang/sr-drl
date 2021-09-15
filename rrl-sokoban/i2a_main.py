@@ -407,7 +407,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-action-node-saparate-20210913"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-updated-20210915"
 	wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
 	wandb.save("*.pt")
 
@@ -487,9 +487,9 @@ if __name__ == '__main__':
 		optimizer.step()
 
 		# distillation
-		distil_loss_action = (a_p.detach() * Variable(a_p_d, requires_grad=True)).sum(0).mean()
-		distil_loss_node = (n_p.detach() * Variable(n_p_d, requires_grad=True)).sum(0).mean()
-		distil_loss_value = (v.detach() * Variable(v_d, requires_grad=True)).sum(0).mean()
+		distil_loss_action = 0.01 * (a_p.detach() * torch.log(Variable(a_p_d, requires_grad=True))).sum(0).mean()
+		distil_loss_node = 0.01 * (n_p.detach() * torch.log(Variable(n_p_d, requires_grad=True))).sum(0).mean()
+		distil_loss_value = (v.detach() - Variable(v_d, requires_grad=True)).sum(0).mean()
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
 		distil_optimizer.zero_grad()
 		distil_loss.backward()
