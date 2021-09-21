@@ -114,6 +114,46 @@ def evaluate(net, split='valid', subset=None):
 
 	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
 
+def evaluate_i2a(net, split='valid', subset=None):
+	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
+	
+	with torch.no_grad():
+		net.eval()
+
+		r_tot = 0.
+		problems_solved = 0
+		problems_finished = 0
+		steps = 0
+
+		s = net.envs.reset()
+
+		while problems_finished < config.eval_problems:
+			state_as_frame = Variable(torch.tensor(net.envs.raw_state(), dtype=torch.float))
+			steps += 1
+
+			a, n, v, pi, a_p, n_p = net(state_as_frame, s=s) # action, node, value, total_prob
+			a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
+			actions = to_action(a, n, s, size=config.soko_size)
+
+			s, r, d, i = net.envs.step(actions)
+
+			# print(r)
+			r_tot += np.sum(r)
+			problems_solved   += sum('all_boxes_on_target' in x and x['all_boxes_on_target'] == True for x in i)
+			problems_finished += np.sum(d)
+
+			tqdm_val.update()
+
+		r_avg = r_tot / (steps * config.eval_batch) # average reward per step
+		problems_solved_ps  = problems_solved / (steps * config.eval_batch)
+		problems_solved_avg = problems_solved / problems_finished
+
+		net.train()
+
+	tqdm_val.close()
+
+	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
+
 # ----------------------------------------------------------------------------------------
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -407,7 +447,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-updated-20210915"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-optimizer-updated-20210921"
 	wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
 	wandb.save("*.pt")
 
@@ -427,7 +467,7 @@ if __name__ == '__main__':
     
 	env_model.load_state_dict(torch.load("env_model_sokoban"))
     
-	distil_optimizer = optim.Adam(net.parameters())
+	distil_optimizer = optim.Adam(distil_policy.parameters())
 	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
 	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs)
 	
@@ -513,6 +553,7 @@ if __name__ == '__main__':
 			log_step = step // config.log_rate
 
 			r_avg, s_ps_avg, s_avg, _ = evaluate(distil_policy)
+			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
 			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
 			debug_net(distil_policy)
 
@@ -535,6 +576,10 @@ if __name__ == '__main__':
 				'reward_avg': r_avg,
 				'solved_per_step': s_ps_avg,
 				'solved_avg': s_avg,
+
+				'reward_avg_i2a': r_avg_i2a,
+				'solved_per_step_i2a': s_ps_avg_i2a,
+				'solved_avg_i2a': s_avg_i2a,
 
 				'reward_avg_train': r_avg_trn,
 				'solved_per_step_train': s_ps_avg_trn,
