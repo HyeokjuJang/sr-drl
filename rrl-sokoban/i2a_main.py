@@ -447,11 +447,14 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-optimizer-updated-20210921"
-	wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
-	wandb.save("*.pt")
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distill-based-on-softmax-20210927"
+	
+	debug = False
+	if not debug:
+		wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
+		wandb.save("*.pt")
 
-	wandb.watch(net, log='all')
+		wandb.watch(net, log='all')
 	# print(net)
 
 	USE_CUDA = torch.cuda.is_available()
@@ -467,7 +470,6 @@ if __name__ == '__main__':
     
 	env_model.load_state_dict(torch.load("env_model_sokoban"))
     
-	distil_optimizer = optim.Adam(distil_policy.parameters())
 	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
 	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs)
 	
@@ -479,6 +481,7 @@ if __name__ == '__main__':
     #optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
     #adam:
 	optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
+	distil_optimizer = optim.Adam(distil_policy.parameters(), lr=lr, eps=eps)
 
 	if USE_CUDA:
 		env_model     = env_model.cuda()
@@ -527,8 +530,17 @@ if __name__ == '__main__':
 		optimizer.step()
 
 		# distillation
-		distil_loss_action = 0.01 * (a_p.detach() * torch.log(Variable(a_p_d, requires_grad=True))).sum(0).mean()
-		distil_loss_node = 0.01 * (n_p.detach() * torch.log(Variable(n_p_d, requires_grad=True))).sum(0).mean()
+
+		# debug print
+		# print("n_p", n_p)
+		# print("n_p_d", n_p_d)
+		# print("a_p", a_p)
+		# print("a_p_d", a_p_d)
+		# print("v", v)
+		# print("v_d", v_d)
+
+		distil_loss_action = 0.01 * (F.softmax(a_p.detach()) * F.log_softmax(Variable(a_p_d, requires_grad=True))).sum(0).mean()
+		distil_loss_node = 0.01 * (F.softmax(n_p.detach()) * F.log_softmax(Variable(n_p_d, requires_grad=True))).sum(0).mean()
 		distil_loss_value = F.mse_loss(Variable(v_d, requires_grad=True), v.detach())
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
 		distil_optimizer.zero_grad()
@@ -566,6 +578,9 @@ if __name__ == '__main__':
 				'loss_pi': loss_pi,
 				'loss_v': loss_v,
 				'loss_h': loss_h,
+				'distil_node_loss': distil_loss_action,
+				'distil_action_loss': distil_loss_node,
+				'distil_value_loss': distil_loss_value,
 				'distil_loss': distil_loss,
 				'entropy estimate': entropy,
 				'gradient norm': norm,
