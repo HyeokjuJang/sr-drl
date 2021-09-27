@@ -108,14 +108,15 @@ class Net(Module):
 
         if only_v:
             return value
-
+        
         def sample_action(xg):
             out_action = self.action_select(xg)
             action_softmax = torch.distributions.Categorical( torch.softmax(out_action, dim=1) )
             action_selected = action_softmax.sample()
 
-            return action_softmax, action_selected
+            return action_softmax, action_selected, out_action
 
+        
         def sample_node(x, a):
             a_expanded = a[batch_ind].view(-1, 1)               # a single action is performed for each graph 
             out_node = self.node_select(x)                      # node_select outputs actiovations for each action,
@@ -129,11 +130,11 @@ class Net(Module):
             # node_softmax = torch.distributions.Categorical( torch.softmax(node_activation, dim=1) )
             # node_selected = node_softmax.sample()
 
-            return node_softmax, node_selected
+            return node_softmax, node_selected, out_node
 
         # return complete probs for debug
         if complete:
-            action_softmax, _ = sample_action(xg)
+            action_softmax, _, _ = sample_action(xg)
 
             out_node = self.node_select(x)
             # if complete, there is only one sample
@@ -143,8 +144,8 @@ class Net(Module):
             return action_softmax, node_softmaxes, value
 
         # select an action & node
-        action_softmax, action_selected = sample_action(xg)
-        node_softmax, node_selected = sample_node(x, action_selected)
+        action_softmax, action_selected, out_action = sample_action(xg)
+        node_softmax, node_selected, out_node = sample_node(x, action_selected)
 
         # compute the selected action probability
         a_prob = action_softmax.probs.gather(1, action_selected.view(-1, 1))
@@ -157,7 +158,7 @@ class Net(Module):
 
         tot_prob = a_prob * n_prob
         
-        return action_selected, node_selected, value, tot_prob, a_prob, n_prob
+        return action_selected, node_selected, value, tot_prob, out_action, out_node
 
     def update(self, r, v, pi, s_, done, target_net=None):
         done = torch.tensor(done, dtype=torch.float32, device=self.device).view(-1, 1)

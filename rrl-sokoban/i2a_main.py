@@ -447,7 +447,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distill-based-on-softmax-20210927"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distill-updated-20210927"
 	
 	debug = False
 	if not debug:
@@ -532,15 +532,19 @@ if __name__ == '__main__':
 		# distillation
 
 		# debug print
-		# print("n_p", n_p)
-		# print("n_p_d", n_p_d)
-		# print("a_p", a_p)
-		# print("a_p_d", a_p_d)
-		# print("v", v)
-		# print("v_d", v_d)
+		# print("n_p", n_p.shape) # [8316, 5]
+		# print("n_p_d", n_p_d.shape) # [8316, 5]
+		# print("a_p", a_p.shape) # [256, 5]
+		# print("a_p_d", a_p_d.shape) # [256, 5]
+		# print("v", v.shape) # [256, 1]
+		# print("v_d", v_d.shape) # [256, 1]
 
-		distil_loss_action = 0.01 * (F.softmax(a_p.detach()) * F.log_softmax(Variable(a_p_d, requires_grad=True))).sum(0).mean()
-		distil_loss_node = 0.01 * (F.softmax(n_p.detach()) * F.log_softmax(Variable(n_p_d, requires_grad=True))).sum(0).mean()
+		# print("action_loss: ", (F.softmax(a_p.detach(), dim=1) * F.log_softmax(Variable(a_p_d, requires_grad=True), dim=1)).sum(1).mean())
+		# print("node_loss: ", (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean())
+		# print("value loss: ", F.mse_loss(Variable(v_d, requires_grad=True), v.detach()))
+
+		distil_loss_action = 0.01 * (F.softmax(a_p.detach(), dim=1) * F.log_softmax(Variable(a_p_d, requires_grad=True), dim=1)).sum(1).mean()
+		distil_loss_node = 0.01 * (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean()
 		distil_loss_value = F.mse_loss(Variable(v_d, requires_grad=True), v.detach())
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
 		distil_optimizer.zero_grad()
