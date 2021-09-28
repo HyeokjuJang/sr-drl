@@ -447,7 +447,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distill-updated-20210927"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-value-loss-deducted-20210928"
 	
 	debug = False
 	if not debug:
@@ -545,7 +545,7 @@ if __name__ == '__main__':
 
 		distil_loss_action = 0.01 * (F.softmax(a_p.detach(), dim=1) * F.log_softmax(Variable(a_p_d, requires_grad=True), dim=1)).sum(1).mean()
 		distil_loss_node = 0.01 * (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean()
-		distil_loss_value = F.mse_loss(Variable(v_d, requires_grad=True), v.detach())
+		distil_loss_value = 0.01 * (F.mse_loss(Variable(v_d, requires_grad=True), v.detach()))
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
 		distil_optimizer.zero_grad()
 		distil_loss.backward()
