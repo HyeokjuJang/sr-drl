@@ -69,6 +69,8 @@ def get_args():
                     help='num of rollouts for i2a algorithm')
 	parser.add_argument('--num_steps', type=int, default=32,
                     help='num of steps for update')
+	parser.add_argument('--debug', action='store_true',
+                    help='connect to wandb')
 	cmd_args = parser.parse_args()
 
 	return cmd_args
@@ -447,9 +449,9 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-loss_pi_removed-20210930"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-kldiv-20210930"
 	
-	debug = False
+	debug = args.debug
 	if not debug:
 		wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
 		wandb.save("*.pt")
@@ -520,7 +522,7 @@ if __name__ == '__main__':
 		# update network
 		loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
 		target_net.copy_weights(net, rho=config.target_rho)
-
+		
 		# distillation
 
 		# debug print
@@ -535,11 +537,11 @@ if __name__ == '__main__':
 		# print("node_loss: ", (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean())
 		# print("value loss: ", F.mse_loss(Variable(v_d, requires_grad=True), v.detach()))
 
-		distil_loss_action = 0.01 * (F.softmax(a_p, dim=1).detach() * F.log_softmax(a_p_d, dim=1)).sum(1).mean()
-		distil_loss_node = 0.01 * (F.softmax(n_p, dim=1).detach() * F.log_softmax(n_p_d, dim=1)).sum(1).mean()
-		#distil_loss_pi = 0.01 * (F.softmax(pi, dim=1).detach() * F.log_softmax(pi_d, dim=1)).sum(1).mean()
-		distil_loss_value = 0.01 * (F.mse_loss(v.detach(), v_d))
-
+		distil_loss_action = F.kl_div(F.log_softmax(a_p_d, dim=1), F.softmax(a_p, dim=1).detach())
+		distil_loss_node = F.kl_div(F.log_softmax(n_p_d, dim=1), F.softmax(n_p, dim=1).detach())
+		distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
+		distil_loss_value = F.mse_loss(v.detach(), v_d)
+		
 		optimizer.zero_grad()
 		loss = loss - entropy * entropy_coef
 		loss.backward()
@@ -548,7 +550,7 @@ if __name__ == '__main__':
 		optimizer.step()
 
 		distil_optimizer.zero_grad()
-		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value# + distil_loss_pi
+		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi
 		distil_loss.backward()
 		distil_optimizer.step()
 		# save step stats
