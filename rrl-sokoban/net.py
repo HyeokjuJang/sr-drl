@@ -8,6 +8,9 @@ from torch_geometric.data import Data, Batch
 from rl import a2c
 from config import config
 
+USE_CUDA = torch.cuda.is_available()
+Variable = lambda *args, **kwargs: torch.autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else torch.autograd.Variable(*args, **kwargs)
+
 def segmented_sample(probs, splits):
     probs_split = torch.split(probs, splits)
     samples = [torch.multinomial(x, 1) for x in probs_split]
@@ -71,9 +74,9 @@ class Net(Module):
         node_feats, edge_attr, edge_index, step_idx, used_indices = zip(*s_batch)
 
         # the tensors have different length
-        node_feats = [torch.tensor(x, dtype=torch.float32, device=self.device) for x in node_feats]
-        edge_attr  = [torch.tensor(x, dtype=torch.float32, device=self.device) for x in edge_attr]
-        edge_index = [torch.tensor(x, dtype=torch.int64, device=self.device) for x in edge_index]
+        node_feats = [Variable(torch.tensor(x, dtype=torch.float32, device=self.device)) for x in node_feats]
+        edge_attr  = [Variable(torch.tensor(x, dtype=torch.float32, device=self.device)) for x in edge_attr]
+        edge_index = [Variable(torch.tensor(x, dtype=torch.int64, device=self.device)) for x in edge_index]
         # step_idx = torch.tensor(step_idx, dtype=torch.float32, device=self.device)
         step_idx = None
 
@@ -94,7 +97,7 @@ class Net(Module):
     def forward(self, s_batch, only_v=False, complete=False, imag_core_input=None):
         # graph embedded data
         x, step_idx, data, edge_attr, edge_index, batch_ind, batch = self.graph_embedding(s_batch)
-
+        
         data_lens = [x.num_nodes for x in data]
 
         # push through graph

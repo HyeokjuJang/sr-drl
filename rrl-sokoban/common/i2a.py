@@ -177,27 +177,25 @@ class ImaginationCore(object):
                 be_pos, be_a = action 
                 onehot_actions[i, be_a, be_pos[1], be_pos[0]] = 1
             
-            inputs = torch.autograd.Variable(torch.cat((torch.tensor(state), onehot_actions), dim=1))
+            inputs = torch.cat((torch.from_numpy(state), onehot_actions), dim=1)
             
             with torch.no_grad():
                 imagined_state, imagined_reward = self.env_model(Variable(inputs))
 
             # print(imagined_state.shape) # [256, 4, 10, 10]
             # print(imagined_reward.shape) # [256]
-            state = (imagined_state>0.5).int().data.cpu()
-            imagined_state = imagined_state.data.cpu()
-            imagined_reward = imagined_reward.data.cpu()
-            
-            imagined_state = torch.FloatTensor(imagined_state).view(rollout_batch_size, *self.in_shape)
+            state = (imagined_state>0.5).int().data.cpu().numpy()
+            imagined_state_cpu = imagined_state.data.cpu().view(rollout_batch_size, *self.in_shape)
 
+            
             onehot_reward = torch.zeros(rollout_batch_size, 1)
-            onehot_reward[range(rollout_batch_size), 0] = imagined_reward
+            onehot_reward[range(rollout_batch_size), 0] = imagined_reward.data.cpu()
             # print(onehot_reward.shape) # [256, 1]
-            rollout_states.append(imagined_state.unsqueeze(0))
+            rollout_states.append(imagined_state_cpu.unsqueeze(0))
             rollout_rewards.append(onehot_reward.unsqueeze(0))
             
             # pick action
-            graph_state = self.envs.to_graph(state.numpy())
+            graph_state = self.envs.to_graph(state)
             with torch.no_grad():
                 a, n, v, pi, _, _ = self.distil_policy(graph_state)
             actions = self.to_action(a, n, graph_state, size=self.soko_size)

@@ -447,7 +447,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil-value-loss-deducted-20210928"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-loss_pi_updated-20210930"
 	
 	debug = False
 	if not debug:
@@ -466,30 +466,29 @@ if __name__ == '__main__':
 	state_shape = input_state_shape[1:4]
 
 	num_pixels = int(input_state_shape[1])
-	env_model     = EnvModel(state_shape, num_pixels, 1)
-    
+	env_model = EnvModel(state_shape, num_pixels, 1)
+
 	env_model.load_state_dict(torch.load("env_model_sokoban"))
-    
+
 	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
 	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs)
 	
-    #rmsprop hyperparams:
-	lr    = 7e-4
-	eps   = 1e-5
+	# rmsprop hyperparams:
+	lr = 7e-4
+	eps = 1e-5
 	alpha = 0.99
-    #rmsprop
-    #optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
-    #adam:
+	# rmsprop
+	# optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
+	# adam:
 	optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
-	distil_optimizer = optim.Adam(distil_policy.parameters(), lr=lr, eps=eps)
+	distil_optimizer = distil_policy.opt
 
 	if USE_CUDA:
-		env_model     = env_model.cuda()
+		env_model = env_model.cuda()
 		net = net.cuda()
 		target_net = target_net.cuda()
-		actor_critic  = actor_critic.cuda()
+		actor_critic = actor_critic.cuda()
 		distil_policy = distil_policy.cuda()
-
 	gamma = 0.99
 	entropy_coef = 0.01
 	value_loss_coef = 0.5
@@ -506,7 +505,7 @@ if __name__ == '__main__':
 	tqdm_main = tqdm(desc='Training', unit=' steps')
 	s = envs.reset()
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
-
+	torch.autograd.set_detect_anomaly(True)
 	for step in itertools.count(start=1):
 		a, n, v, pi, a_p, n_p = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
 		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
@@ -522,13 +521,6 @@ if __name__ == '__main__':
 		loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
 		target_net.copy_weights(net, rho=config.target_rho)
 
-		loss = loss - entropy * entropy_coef
-		optimizer.zero_grad()
-		loss.backward()
-		# clip the gradient norm
-		norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
-		optimizer.step()
-
 		# distillation
 
 		# debug print
@@ -543,14 +535,22 @@ if __name__ == '__main__':
 		# print("node_loss: ", (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean())
 		# print("value loss: ", F.mse_loss(Variable(v_d, requires_grad=True), v.detach()))
 
-		distil_loss_action = 0.01 * (F.softmax(a_p.detach(), dim=1) * F.log_softmax(Variable(a_p_d, requires_grad=True), dim=1)).sum(1).mean()
-		distil_loss_node = 0.01 * (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean()
-		distil_loss_value = 0.01 * (F.mse_loss(Variable(v_d, requires_grad=True), v.detach()))
-		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value
+		distil_loss_action = 0.01 * (F.softmax(a_p, dim=1).detach() * F.log_softmax(a_p_d, dim=1)).sum(1).mean()
+		distil_loss_node = 0.01 * (F.softmax(n_p, dim=1).detach() * F.log_softmax(n_p_d, dim=1)).sum(1).mean()
+		distil_loss_pi = 0.01 * (F.softmax(pi, dim=1).detach() * F.log_softmax(pi_d, dim=1)).sum(1).mean()
+		distil_loss_value = 0.01 * (F.mse_loss(v.detach(), v_d))
+
+		optimizer.zero_grad()
+		loss = loss - entropy * entropy_coef
+		loss.backward()
+		# clip the gradient norm
+		norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
+		optimizer.step()
+
 		distil_optimizer.zero_grad()
+		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi
 		distil_loss.backward()
 		distil_optimizer.step()
-
 		# save step stats
 		tot_env_steps += config.batch
 		tot_el_env_steps += np.sum([x['elementary_steps'] for x in i])
@@ -585,6 +585,7 @@ if __name__ == '__main__':
 				'distil_node_loss': distil_loss_action,
 				'distil_action_loss': distil_loss_node,
 				'distil_value_loss': distil_loss_value,
+				'distil_pi_loss': distil_loss_pi,
 				'distil_loss': distil_loss,
 				'entropy estimate': entropy,
 				'gradient norm': norm,
