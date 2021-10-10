@@ -449,7 +449,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-max-grad-5.0-20211005"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-adamW-lr_weight_decay_adjusted-20211010"
 	
 	debug = args.debug
 	if not debug:
@@ -482,7 +482,7 @@ if __name__ == '__main__':
 	# rmsprop
 	# optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
 	# adam:
-	optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
+	optimizer = optim.AdamW(actor_critic.parameters(), lr=config.opt_lr, weight_decay=config.opt_l2)
 	distil_optimizer = distil_policy.opt
 
 	if USE_CUDA:
@@ -552,7 +552,7 @@ if __name__ == '__main__':
 		distil_optimizer.zero_grad()
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi
 		distil_loss.backward()
-		torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), config.opt_max_norm)
+		torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
 		distil_optimizer.step()
 		# save step stats
 		tot_env_steps += config.batch
