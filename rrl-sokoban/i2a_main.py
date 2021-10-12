@@ -449,7 +449,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-adamW-lr_weight_decay_adjusted-20211010"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-base_check-20211012"
 	
 	debug = args.debug
 	if not debug:
@@ -482,7 +482,7 @@ if __name__ == '__main__':
 	# rmsprop
 	# optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
 	# adam:
-	optimizer = optim.AdamW(actor_critic.parameters(), lr=config.opt_lr, weight_decay=config.opt_l2)
+	optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
 	distil_optimizer = distil_policy.opt
 
 	if USE_CUDA:
@@ -524,19 +524,6 @@ if __name__ == '__main__':
 		target_net.copy_weights(net, rho=config.target_rho)
 		
 		# distillation
-
-		# debug print
-		# print("n_p", n_p.shape) # [8316, 5]
-		# print("n_p_d", n_p_d.shape) # [8316, 5]
-		# print("a_p", a_p.shape) # [256, 5]
-		# print("a_p_d", a_p_d.shape) # [256, 5]
-		# print("v", v.shape) # [256, 1]
-		# print("v_d", v_d.shape) # [256, 1]
-
-		# print("action_loss: ", (F.softmax(a_p.detach(), dim=1) * F.log_softmax(Variable(a_p_d, requires_grad=True), dim=1)).sum(1).mean())
-		# print("node_loss: ", (F.softmax(n_p.detach(), dim=1) * F.log_softmax(Variable(n_p_d, requires_grad=True), dim=1)).sum(1).mean())
-		# print("value loss: ", F.mse_loss(Variable(v_d, requires_grad=True), v.detach()))
-
 		distil_loss_action = F.kl_div(F.log_softmax(a_p_d, dim=1), F.softmax(a_p, dim=1).detach())
 		distil_loss_node = F.kl_div(F.log_softmax(n_p_d, dim=1), F.softmax(n_p, dim=1).detach())
 		distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
