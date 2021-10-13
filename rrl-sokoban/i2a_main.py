@@ -449,7 +449,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-base_check-20211012"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-grad_norm-20211013"
 	
 	debug = args.debug
 	if not debug:
@@ -524,8 +524,8 @@ if __name__ == '__main__':
 		target_net.copy_weights(net, rho=config.target_rho)
 		
 		# distillation
-		distil_loss_action = F.kl_div(F.log_softmax(a_p_d, dim=1), F.softmax(a_p, dim=1).detach())
-		distil_loss_node = F.kl_div(F.log_softmax(n_p_d, dim=1), F.softmax(n_p, dim=1).detach())
+		distil_loss_action = F.kl_div(F.log_softmax(a_p_d, dim=1), F.softmax(a_p, dim=1).detach()) + torch.log(a_p_d + 1e-9).mean() * entropy_coef
+		distil_loss_node = F.kl_div(F.log_softmax(n_p_d, dim=1), F.softmax(n_p, dim=1).detach()) + torch.log(n_p_d + 1e-9).mean() * entropy_coef
 		distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
 		distil_loss_value = F.mse_loss(v.detach(), v_d)
 		
@@ -539,7 +539,7 @@ if __name__ == '__main__':
 		distil_optimizer.zero_grad()
 		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi
 		distil_loss.backward()
-		torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
+		distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
 		distil_optimizer.step()
 		# save step stats
 		tot_env_steps += config.batch
@@ -579,6 +579,9 @@ if __name__ == '__main__':
 				'distil_loss': distil_loss,
 				'entropy estimate': entropy,
 				'gradient norm': norm,
+				'distil_gradient_norm': distil_grad_norm,
+
+				'distil_value': v_d.mean(),
 
 				'lr': net.lr,
 				'alpha_h': net.alpha_h,
