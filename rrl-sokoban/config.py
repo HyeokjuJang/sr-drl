@@ -63,6 +63,9 @@ class Object:
 		self.eval_problems = 1000
 		# self.eval_steps = 500
 		self.eval_batch = 64
+		
+		self.distil_learn_alone = 200
+		self.distil_learn_alone_interval = 1000
 
 		self.load_model = args.load_model
 

@@ -73,7 +73,7 @@ class I2A(OnPolicy):
             nn.ReLU(),
         )
         
-    def forward(self, state, s=None):
+    def forward(self, state, s=None, complete=False):
         batch_size = state.shape[0]
         state_np = state.data.cpu().numpy()
         if s is not None:
@@ -92,8 +92,11 @@ class I2A(OnPolicy):
         x = torch.cat([state, hidden], 1)
         x = self.fc(x)
         
-        action_selected, node_selected, value, tot_prob, a_p, n_p = self.net(graph_state, imag_core_input=x)
+        if complete:
+            action_softmax, node_softmaxes, value = self.net(graph_state, imag_core_input=x, complete=True)
+            return action_softmax, node_softmaxes, value
 
+        action_selected, node_selected, value, tot_prob, a_p, n_p = self.net(graph_state, imag_core_input=x)
         # output shapes [batch_size], [batch_size], [batch_size, 1], [batch_size, 1]
         return action_selected, node_selected, value, tot_prob, a_p, n_p
         

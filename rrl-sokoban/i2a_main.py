@@ -120,7 +120,8 @@ def evaluate(net, split='valid', subset=None):
 
 def evaluate_i2a(net, split='valid', subset=None):
 	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
-	
+	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split=split, subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
+
 	with torch.no_grad():
 		net.eval()
 
@@ -129,17 +130,16 @@ def evaluate_i2a(net, split='valid', subset=None):
 		problems_finished = 0
 		steps = 0
 
-		s = net.envs.reset()
+		s = test_env.reset()
 
 		while problems_finished < config.eval_problems:
-			state_as_frame = Variable(torch.tensor(net.envs.raw_state(), dtype=torch.float))
+			state_as_frame = Variable(torch.tensor(test_env.raw_state(), dtype=torch.float))
 			steps += 1
 
 			a, n, v, pi, a_p, n_p = net(state_as_frame, s=s) # action, node, value, total_prob
-			a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
 			actions = to_action(a, n, s, size=config.soko_size)
 
-			s, r, d, i = net.envs.step(actions)
+			s, r, d, i = test_env.step(actions)
 
 			# print(r)
 			r_tot += np.sum(r)
@@ -162,10 +162,14 @@ def evaluate_i2a(net, split='valid', subset=None):
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-def get_plotly(net, env, s, title=None):
+def get_plotly(net, env, s, title=None, distil=True):
 	s_img = env.render(mode='rgb_array')
+	state_as_frame = torch.tensor(env.raw_state(), dtype=torch.float)
 
-	action_softmax, node_softmaxes, value = net([s], complete=True)
+	if distil:
+		action_softmax, node_softmaxes, value = net([s], complete=True)
+	else:
+		action_softmax, node_softmaxes, value = net([state_as_frame], [s], complete=True)
 
 	action_probs = action_softmax.probs[0].cpu()
 	# node_probs = node_softmaxes[0].reshape(*config.soko_size, 5).flip(0).cpu() # flip is because Heatmap flips the display :-(
@@ -193,19 +197,23 @@ def get_plotly(net, env, s, title=None):
 
 	return fig, value, action_probs
 
-def debug_net(net):
+def debug_net(net, distil=True):
 	test_env = gym.make('Sokograph-v0', split='valid')
 	s = test_env.reset()
 	s_img = test_env.render(mode='rgb_array')
 
 	with torch.no_grad():
 		net.eval()
-		fig, value, action_probs = get_plotly(net, test_env, s)
+		fig, value, action_probs = get_plotly(net, test_env, s, distil)
 		net.train()
-
-	wandb.log({'net_debug': fig, 'value': value, 
-		'aprob_goto': action_probs[0], 'aprob_up': action_probs[1], 'aprob_down': action_probs[2], 
-		'aprob_left': action_probs[3], 'aprob_right': action_probs[4]}, commit=False)
+	if distil:
+		wandb.log({'net_debug': fig, 'value': value, 
+			'aprob_goto': action_probs[0], 'aprob_up': action_probs[1], 'aprob_down': action_probs[2], 
+			'aprob_left': action_probs[3], 'aprob_right': action_probs[4]}, commit=False)
+	else:
+		wandb.log({'net_debug_i2a': fig, 'value_i2a': value, 
+			'aprob_goto_i2a': action_probs[0], 'aprob_up_i2a': action_probs[1], 'aprob_down_i2a': action_probs[2], 
+			'aprob_left_i2a': action_probs[3], 'aprob_right_i2a': action_probs[4]}, commit=False)
 
 def trace_net(net, net_name, steps=100):
 	import imageio, io
@@ -423,6 +431,7 @@ if __name__ == '__main__':
 	target_net = Net(inside_i2a=True)
 
 	distil_policy = Net()
+	distil_target_policy = Net()
 
 	if config.load_model:
 		distil_policy.load(config.load_model)
@@ -451,7 +460,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-grad_norm-20211013"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_distil_200/1000-20211022"
 	
 	debug = args.debug
 	if not debug:
@@ -493,6 +502,7 @@ if __name__ == '__main__':
 		target_net = target_net.cuda()
 		actor_critic = actor_critic.cuda()
 		distil_policy = distil_policy.cuda()
+		distil_target_policy = distil_target_policy.cuda()
 	gamma = 0.99
 	entropy_coef = 0.01
 	value_loss_coef = 0.5
@@ -511,14 +521,18 @@ if __name__ == '__main__':
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 	torch.autograd.set_detect_anomaly(True)
 	for step in itertools.count(start=1):
+		
 		a, n, v, pi, a_p, n_p = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
 		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
 		
 		# draw graph
 		# make_dot(distil_policy(s), params=dict(distil_policy.named_parameters())).render("graph", format="png")
-		
-		actions = to_action(a, n, s, size=config.soko_size)
 
+		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
+			actions = to_action(a_d, n_d, s, size=config.soko_size)
+		else:
+			actions = to_action(a, n, s, size=config.soko_size)
+		
 		# print(actions)
 		s, r, d, i = envs.step(actions)
 
@@ -526,27 +540,36 @@ if __name__ == '__main__':
 		d_true = [x['d_true'] for x in i]
 		state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 		# update network
-		loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
-		target_net.copy_weights(net, rho=config.target_rho)
-		
+		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
+			loss, loss_pi, loss_v, loss_h, entropy = distil_policy.update(r, v_d, pi_d, s_true, d_true, distil_target_policy)
+			distil_target_policy.copy_weights(distil_policy, rho=config.target_rho)
+		else:
+			loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
+			target_net.copy_weights(net, rho=config.target_rho)
+	
 		# distillation
-		distil_loss_action = F.kl_div(F.log_softmax(a_p_d, dim=1), F.softmax(a_p, dim=1).detach()) + torch.log(a_p_d + 1e-9).mean() * entropy_coef
-		distil_loss_node = F.kl_div(F.log_softmax(n_p_d, dim=1), F.softmax(n_p, dim=1).detach()) + torch.log(n_p_d + 1e-9).mean() * entropy_coef
+		distil_loss_action = F.kl_div(F.log_softmax(a_p_d + 1e-9, dim=1), F.softmax(a_p + 1e-9, dim=1).detach())
+		distil_loss_node = F.kl_div(F.log_softmax(n_p_d + 1e-9, dim=1), F.softmax(n_p + 1e-9, dim=1).detach()) 
 		distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
 		distil_loss_value = F.mse_loss(v.detach(), v_d)
-		
+		distil_loss_entropy = (torch.log(a_p_d + 1e-9).mean() + torch.log(n_p_d + 1e-9).mean()) * entropy_coef
 		optimizer.zero_grad()
 		loss = loss - entropy * entropy_coef
-		loss.backward()
-		# clip the gradient norm
-		norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
-		optimizer.step()
 
+		# clip the gradient norm
+		if not (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
+			loss.backward()
+			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
+			optimizer.step()
+		
 		distil_optimizer.zero_grad()
-		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi
+		distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi + distil_loss_entropy
+		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
+			distil_loss += loss
 		distil_loss.backward()
 		distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
 		distil_optimizer.step()
+
 		# save step stats
 		tot_env_steps += config.batch
 		tot_el_env_steps += np.sum([x['elementary_steps'] for x in i])
@@ -568,7 +591,7 @@ if __name__ == '__main__':
 			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
 			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
 			debug_net(distil_policy)
-
+			debug_net(actor_critic, distli=False)
 			log = {
 				'env_steps': tot_env_steps,
 				'el_env_steps': tot_el_env_steps,

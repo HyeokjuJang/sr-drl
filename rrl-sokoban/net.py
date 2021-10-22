@@ -173,18 +173,18 @@ class Net(Module):
        
         num_actions = torch.tensor([x[0].shape[0] * 5 for x in s_], dtype=torch.float32, device=self.device).reshape(-1, 1) # 5 actions per node
 
-        loss, loss_pi, loss_v, loss_h, entropy = a2c(r, v, v_, pi, config.gamma, config.alpha_v, self.alpha_h, config.q_range, num_actions)
+        loss, loss_pi, loss_v, loss_h, entropy, _ = a2c(r, v, v_, pi, config.gamma, config.alpha_v, self.alpha_h, config.q_range, num_actions)
 
-        self.opt.zero_grad()
-        loss.backward()
+        # self.opt.zero_grad()
+        # loss.backward()
 
-        # clip the gradient norm
-        norm = torch.nn.utils.clip_grad_norm_(self.parameters(), config.opt_max_norm)
+        # # clip the gradient norm
+        # norm = torch.nn.utils.clip_grad_norm_(self.parameters(), config.opt_max_norm)
 
-        self.opt.step()
+        # self.opt.step()
 
         # for logging
-        return loss, loss_pi, loss_v, loss_h, entropy, norm
+        return loss, loss_pi, loss_v, loss_h, entropy#, norm
 
     def set_lr(self, lr):
         self.lr = lr
