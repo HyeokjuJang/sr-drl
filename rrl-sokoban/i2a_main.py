@@ -10,6 +10,8 @@ from vec_env.subproc_vec_env import SubprocVecEnv
 from net import Net
 from tqdm import tqdm
 
+# from torchviz import make_dot
+
 from config import config
 
 # ----------------------------------------------------------------------------------------
@@ -503,7 +505,7 @@ if __name__ == '__main__':
 
 	tot_env_steps = 0
 	tot_el_env_steps = 0
-
+	
 	tqdm_main = tqdm(desc='Training', unit=' steps')
 	s = envs.reset()
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
@@ -511,6 +513,10 @@ if __name__ == '__main__':
 	for step in itertools.count(start=1):
 		a, n, v, pi, a_p, n_p = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
 		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
+		
+		# draw graph
+		# make_dot(distil_policy(s), params=dict(distil_policy.named_parameters())).render("graph", format="png")
+		
 		actions = to_action(a, n, s, size=config.soko_size)
 
 		# print(actions)
