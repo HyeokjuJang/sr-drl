@@ -130,10 +130,10 @@ def evaluate_i2a(net, split='valid', subset=None):
 		problems_finished = 0
 		steps = 0
 
-		s = test_env.reset()
+		s = [test_env.reset()]
 
 		while problems_finished < config.eval_problems:
-			state_as_frame = Variable(torch.tensor(test_env.raw_state(), dtype=torch.float))
+			state_as_frame = Variable(torch.tensor([test_env.raw_state()], dtype=torch.float))
 			steps += 1
 
 			a, n, v, pi, a_p, n_p = net(state_as_frame, s=s) # action, node, value, total_prob

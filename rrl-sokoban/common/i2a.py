@@ -165,14 +165,14 @@ class ImaginationCore(object):
 
         rollout_batch_size = batch_size
         
-        # pick action
-        graph_state = self.envs.to_graph(state)
-        with torch.no_grad():
-            a, n, v, pi, _, _ = self.distil_policy(graph_state)
-        actions = self.to_action(a, n, graph_state, size=self.soko_size)
-
         # step action
         for step in range(self.num_rolouts):
+            # pick action
+            graph_state = self.envs.to_graph(state)
+            with torch.no_grad():
+                a, n, v, pi, _, _ = self.distil_policy(graph_state)
+            actions = self.to_action(a, n, graph_state, size=self.soko_size)
+
             onehot_actions = torch.zeros(batch_size, self.num_actions, self.in_shape[1], self.in_shape[2])
 	
             # action embedding
@@ -197,11 +197,7 @@ class ImaginationCore(object):
             rollout_states.append(imagined_state_cpu.unsqueeze(0))
             rollout_rewards.append(onehot_reward.unsqueeze(0))
             
-            # pick action
-            graph_state = self.envs.to_graph(state)
-            with torch.no_grad():
-                a, n, v, pi, _, _ = self.distil_policy(graph_state)
-            actions = self.to_action(a, n, graph_state, size=self.soko_size)
+            
         
         return torch.cat(rollout_states), torch.cat(rollout_rewards)
         
