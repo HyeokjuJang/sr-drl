@@ -172,7 +172,7 @@ class ImaginationCore(object):
             with torch.no_grad():
                 a, n, v, pi, _, _ = self.distil_policy(graph_state)
             actions = self.to_action(a, n, graph_state, size=self.soko_size)
-
+            
             onehot_actions = torch.zeros(batch_size, self.num_actions, self.in_shape[1], self.in_shape[2])
 	
             # action embedding

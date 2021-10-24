@@ -121,7 +121,8 @@ def evaluate(net, split='valid', subset=None):
 def evaluate_i2a(net, split='valid', subset=None):
 	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
 	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split=split, subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
-
+	tmp_env = net.envs
+	net.envs = test_env
 	with torch.no_grad():
 		net.eval()
 
@@ -130,16 +131,16 @@ def evaluate_i2a(net, split='valid', subset=None):
 		problems_finished = 0
 		steps = 0
 
-		s = [test_env.reset()]
-
+		s = net.envs.reset()
+		
 		while problems_finished < config.eval_problems:
-			state_as_frame = Variable(torch.tensor([test_env.raw_state()], dtype=torch.float))
+			state_as_frame = Variable(torch.tensor(net.envs.raw_state(), dtype=torch.float))
 			steps += 1
-
+			
 			a, n, v, pi, a_p, n_p = net(state_as_frame, s=s) # action, node, value, total_prob
 			actions = to_action(a, n, s, size=config.soko_size)
 
-			s, r, d, i = test_env.step(actions)
+			s, r, d, i = net.envs.step(actions)
 
 			# print(r)
 			r_tot += np.sum(r)
@@ -153,7 +154,7 @@ def evaluate_i2a(net, split='valid', subset=None):
 		problems_solved_avg = problems_solved / problems_finished
 
 		net.train()
-
+	net.envs = tmp_env
 	tqdm_val.close()
 
 	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
@@ -460,7 +461,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_distil_200/1000-20211022"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_distil_200/1000-20211024"
 	
 	debug = args.debug
 	if not debug:
@@ -535,7 +536,7 @@ if __name__ == '__main__':
 		
 		# print(actions)
 		s, r, d, i = envs.step(actions)
-
+		
 		s_true = [x['s_true'] for x in i]
 		d_true = [x['d_true'] for x in i]
 		state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))

@@ -62,7 +62,7 @@ class Object:
 		self.log_rate = self.epoch
 		self.eval_problems = 1000
 		# self.eval_steps = 500
-		self.eval_batch = 64
+		self.eval_batch = args.batch
 		
 		self.distil_learn_alone = 200
 		self.distil_learn_alone_interval = 1000
