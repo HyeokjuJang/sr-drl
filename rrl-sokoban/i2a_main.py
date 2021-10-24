@@ -461,7 +461,7 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_distil_200/1000-20211024"
+	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_distil_200/1000-20211025"
 	
 	debug = args.debug
 	if not debug:
@@ -592,7 +592,7 @@ if __name__ == '__main__':
 			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
 			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
 			debug_net(distil_policy)
-			debug_net(actor_critic, distil=False)
+			# debug_net(actor_critic, distil=False)
 			log = {
 				'env_steps': tot_env_steps,
 				'el_env_steps': tot_el_env_steps,
