@@ -592,7 +592,7 @@ if __name__ == '__main__':
 			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
 			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
 			debug_net(distil_policy)
-			debug_net(actor_critic, distli=False)
+			debug_net(actor_critic, distil=False)
 			log = {
 				'env_steps': tot_env_steps,
 				'el_env_steps': tot_el_env_steps,
