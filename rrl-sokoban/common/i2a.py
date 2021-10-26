@@ -131,6 +131,11 @@ class I2A(OnPolicy):
         # for logging
         return loss, loss_pi, loss_v, loss_h, entropy, log_pi
     
+    def change_env(self, envs):
+        self.envs = envs
+        self.imagination.envs = envs
+
+
     def save(self, file='model.pt'):
         torch.save(self.state_dict(), file)
 
@@ -174,7 +179,7 @@ class ImaginationCore(object):
             actions = self.to_action(a, n, graph_state, size=self.soko_size)
             
             onehot_actions = torch.zeros(batch_size, self.num_actions, self.in_shape[1], self.in_shape[2])
-	
+            
             # action embedding
             for i, action in enumerate(actions):
                 be_pos, be_a = action 

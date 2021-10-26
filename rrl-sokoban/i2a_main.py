@@ -49,6 +49,8 @@ def get_args():
 
 	# optimal cpu=2, device=cuda (rate 3.5)
 	parser = argparse.ArgumentParser()
+	parser.add_argument('-id', type=str, default="no_id", help="id of the log")
+
 	parser.add_argument('-device', type=str, choices=['auto', 'cpu', 'cuda'] + cuda_devices, default='cuda', help="Which device to use")
 	parser.add_argument('-cpus', type=str, default='4', help="How many CPUs to use")
 	parser.add_argument('-batch', type=int, default=256, help="Size of a batch / How many CPUs to use")
@@ -66,6 +68,7 @@ def get_args():
 	parser.add_argument('-eval', action='store_const', const=True, help="Evaluate the agent")
 	parser.add_argument('-env_pretrain', action='store_const', const=True, help="Pretrain env model")
 	parser.add_argument('-pretrained_env_test', action='store_const', const=True, help="test Pretrained env model")
+	
 
 	parser.add_argument('--num_rollouts', type=int, default=5,
                     help='num of rollouts for i2a algorithm')
@@ -73,6 +76,11 @@ def get_args():
                     help='num of steps for update')
 	parser.add_argument('--debug', action='store_true',
                     help='connect to wandb')
+	parser.add_argument('--d_rate', type=int, default=5,
+                    help='distil rate 1/d_rate distillation learn alone')
+	parser.add_argument('--d_interval', type=int, default=10,
+                    help='distil interval 1/d_rate * d_interval distillation learn alone')
+
 	cmd_args = parser.parse_args()
 
 	return cmd_args
@@ -122,7 +130,7 @@ def evaluate_i2a(net, split='valid', subset=None):
 	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
 	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split=split, subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
 	tmp_env = net.envs
-	net.envs = test_env
+	net.change_env(test_env)
 	with torch.no_grad():
 		net.eval()
 
@@ -154,7 +162,7 @@ def evaluate_i2a(net, split='valid', subset=None):
 		problems_solved_avg = problems_solved / problems_finished
 
 		net.train()
-	net.envs = tmp_env
+	net.change_env(tmp_env)
 	tqdm_val.close()
 
 	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
@@ -165,12 +173,12 @@ from plotly.subplots import make_subplots
 
 def get_plotly(net, env, s, title=None, distil=True):
 	s_img = env.render(mode='rgb_array')
-	state_as_frame = torch.tensor(env.raw_state(), dtype=torch.float)
-
+	
 	if distil:
 		action_softmax, node_softmaxes, value = net([s], complete=True)
 	else:
-		action_softmax, node_softmaxes, value = net([state_as_frame], [s], complete=True)
+		state_as_frame = Variable(torch.tensor([net.envs.raw_state()], dtype=torch.float))
+		action_softmax, node_softmaxes, value = net(state_as_frame, s=[s], complete=True)
 
 	action_probs = action_softmax.probs[0].cpu()
 	# node_probs = node_softmaxes[0].reshape(*config.soko_size, 5).flip(0).cpu() # flip is because Heatmap flips the display :-(
@@ -200,13 +208,23 @@ def get_plotly(net, env, s, title=None, distil=True):
 
 def debug_net(net, distil=True):
 	test_env = gym.make('Sokograph-v0', split='valid')
-	s = test_env.reset()
-	s_img = test_env.render(mode='rgb_array')
+	# test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split='valid') for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
+	if distil:
+		s = test_env.reset()
+	else:
+		tmp_env = net.envs
+		net.change_env(test_env)
+		s = net.envs.reset()
 
+	
 	with torch.no_grad():
 		net.eval()
-		fig, value, action_probs = get_plotly(net, test_env, s, distil)
+		fig, value, action_probs = get_plotly(net, test_env, s, distil=distil)
 		net.train()
+	
+	if not distil:
+		net.change_env(tmp_env)
+
 	if distil:
 		wandb.log({'net_debug': fig, 'value': value, 
 			'aprob_goto': action_probs[0], 'aprob_up': action_probs[1], 'aprob_down': action_probs[2], 
@@ -461,7 +479,10 @@ if __name__ == '__main__':
 	envs = SubprocVecEnv([lambda: gym.make('Sokograph-v0', subset=config.subset) for i in range(config.batch)], in_series=(config.batch // config.cpus), context='fork')
 	# env = ParallelEnv('Sokograph-v0', n_envs=N_ENVS, cpus=N_CPUS)
 
-	job_name = f"{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} id-distil_distil_200/1000-20211025"
+	job_name = f'{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} '\
+				f'mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} '\
+				f'd_rate-{config.distil_learn_alone} d_interval-{config.distil_learn_alone_interval} '\
+				f'id-{args.id}'
 	
 	debug = args.debug
 	if not debug:
@@ -589,10 +610,12 @@ if __name__ == '__main__':
 			log_step = step // config.log_rate
 
 			r_avg, s_ps_avg, s_avg, _ = evaluate(distil_policy)
-			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
 			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
 			debug_net(distil_policy)
-			# debug_net(actor_critic, distil=False)
+
+			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
+			debug_net(actor_critic, distil=False)
+			
 			log = {
 				'env_steps': tot_env_steps,
 				'el_env_steps': tot_el_env_steps,

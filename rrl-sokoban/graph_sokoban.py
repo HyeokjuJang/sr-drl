@@ -186,6 +186,9 @@ class GraphSokoban(gym.Env):
 		step_idx = self.env.num_env_steps / self.env.max_steps	# use the elementary step_idx!
 		
 		return n_feats, edge_feats, edge_index, step_idx, no_walls_indices
+	
+	def to_graph(self, s):
+		return [self._to_graph(s_) for s_ in s]
 
 	def step(self, action):
 		self.step_idx += 1
