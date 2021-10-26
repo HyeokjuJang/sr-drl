@@ -64,7 +64,7 @@ class Object:
 		# self.eval_steps = 500
 		self.eval_batch = args.batch
 		
-		self.distil_learn_alone = args.d_rate
+		self.distil_learn_alone = args.d_alone
 		self.distil_learn_alone_interval = args.d_interval
 
 		self.load_model = args.load_model

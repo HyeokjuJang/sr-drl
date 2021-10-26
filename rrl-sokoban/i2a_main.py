@@ -76,10 +76,10 @@ def get_args():
                     help='num of steps for update')
 	parser.add_argument('--debug', action='store_true',
                     help='connect to wandb')
-	parser.add_argument('--d_rate', type=int, default=5,
-                    help='distil rate 1/d_rate distillation learn alone')
+	parser.add_argument('--d_alone', type=int, default=2,
+                    help='distillation learn alone times in interval')
 	parser.add_argument('--d_interval', type=int, default=10,
-                    help='distil interval 1/d_rate * d_interval distillation learn alone')
+                    help='distillation learn alone interval')
 
 	cmd_args = parser.parse_args()
 
