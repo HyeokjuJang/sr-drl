@@ -570,13 +570,14 @@ if __name__ == '__main__':
 			target_net.copy_weights(net, rho=config.target_rho)
 	
 		# distillation
-		distil_loss_action = F.kl_div(F.log_softmax(a_p_d + 1e-9, dim=1), F.softmax(a_p + 1e-9, dim=1).detach())
-		distil_loss_node = F.kl_div(F.log_softmax(n_p_d + 1e-9, dim=1), F.softmax(n_p + 1e-9, dim=1).detach()) 
+		distil_loss_action = F.kl_div(F.log_softmax(a_p_d + 1e-5, dim=1), F.softmax(a_p + 1e-9, dim=1).detach())
+		distil_loss_node = F.kl_div(F.log_softmax(n_p_d + 1e-5, dim=1), F.softmax(n_p + 1e-9, dim=1).detach()) 
 		distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
 		distil_loss_value = F.mse_loss(v.detach(), v_d)
-		distil_loss_entropy = (torch.log(a_p_d + 1e-9).mean() + torch.log(n_p_d + 1e-9).mean()) * entropy_coef
+		# distil_loss_entropy = (torch.log(a_p_d + 1e-5).mean() + torch.log(n_p_d + 1e-5).mean()) * entropy_coef
+		distil_loss_entropy = (torch.log(pi_d) + 1e-5).mean() * entropy_coef
 		optimizer.zero_grad()
-		loss = loss - entropy * entropy_coef
+		loss = loss - entropy
 
 		# clip the gradient norm
 		if not (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
@@ -590,6 +591,7 @@ if __name__ == '__main__':
 			distil_loss += loss
 		distil_loss.backward()
 		distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
+
 		distil_optimizer.step()
 
 		# save step stats
