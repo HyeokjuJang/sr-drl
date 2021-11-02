@@ -65,6 +65,7 @@ def get_args():
 	parser.add_argument('--custom', type=str, default=None, help="Custom size (e.g. 10x10x4; else Boxoban)")
 
 	parser.add_argument('-trace', action='store_const', const=True, help="Show trace of the agent")
+	parser.add_argument('-trace_i2a', action='store_const', const=True, help="Show trace of the agent")
 	parser.add_argument('-eval', action='store_const', const=True, help="Evaluate the agent")
 	parser.add_argument('-env_pretrain', action='store_const', const=True, help="Pretrain env model")
 	parser.add_argument('-pretrained_env_test', action='store_const', const=True, help="test Pretrained env model")
@@ -266,6 +267,44 @@ def trace_net(net, net_name, steps=100):
 
 		net.train()
 
+def trace_i2a_net(net, net_name, steps=100):
+	import imageio, io
+	from pdfrw import PdfReader, PdfWriter
+
+	test_env = gym.make('Sokograph-v0', split='valid')
+	
+	tmp_env = net.envs
+	net.change_env(test_env)
+	s = net.envs.reset()
+
+	with torch.no_grad():
+		net.eval()
+		imgs = []
+
+		tqdm_trace = tqdm(desc='Creating trace', unit=' steps', total=steps)
+		for step in range(steps):
+			fig, _, _ = get_plotly(net, test_env, s, title='{}-{}-steps'.format(net_name, str(step)), distil=False)
+			imgs.append(fig.to_image(format='pdf'))
+
+			state_as_frame = Variable(torch.tensor([net.envs.raw_state()], dtype=torch.float))
+			a, n, v, pi, a_p, n_p = net(state_as_frame, s=[s])
+			
+			actions = to_action(a, n, [s], size=config.soko_size)
+
+			s, r, d, i = net.envs.step(actions[0])
+
+			tqdm_trace.update()
+
+		writer = PdfWriter()
+		for img in imgs:
+			pdf_img = PdfReader(io.BytesIO(img)).pages
+			writer.addpages(pdf_img)
+
+		writer.write('trace.pdf')
+
+		net.change_env(tmp_env)
+		net.train()
+
 def env_pretrain(net, tot_steps, subset=None, ):
 	from common.environment_model import EnvModelSokoban as EnvModel
 
@@ -453,8 +492,8 @@ if __name__ == '__main__':
 	distil_target_policy = Net()
 
 	if config.load_model:
-		distil_policy.load(config.load_model)
-
+		distil_policy.load(os.path.join(config.load_model, "files", "model_distil.pt"))
+		
 		print(f"Model loaded: {config.load_model}")
 
 	if args.trace:
@@ -538,6 +577,13 @@ if __name__ == '__main__':
 	tot_env_steps = 0
 	tot_el_env_steps = 0
 	
+	if config.load_model:
+		actor_critic.load_state_dict(torch.load(os.path.join(config.load_model, "files","model_i2a.pt")))
+
+	if args.trace_i2a:
+		trace_i2a_net(actor_critic, "I2A + SR-DRL")
+		exit(0)
+
 	tqdm_main = tqdm(desc='Training', unit=' steps')
 	s = envs.reset()
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))

@@ -6,6 +6,10 @@ import random, gym
 
 from config import config
 
+RENDER = False
+if RENDER:
+	import time
+
 class GraphSokoban(gym.Env):
 	def __init__(self, **kwargs):
 		# different processes need different seeds
@@ -90,8 +94,9 @@ class GraphSokoban(gym.Env):
 			s, r, d, i = self.env.step(a)
 			r_tot += r
 
-			# env.render(mode='human')
-			# input()
+			if RENDER:
+				self.env.render(mode='human')
+				time.sleep(0.2)
 
 		return s, r_tot, d, i
 
@@ -205,7 +210,9 @@ class GraphSokoban(gym.Env):
 				s, r_tot, d, i = self._execute(tpath)
 			else:
 				s, r_tot, d, i = self.env.step(0)		 # if it's not possible do noop
-
+				if RENDER:
+					self.env.render(mode='human')
+					time.sleep(0.2)
 		else:
 			pos += self.PUSH_ACTION[a]
 			tpath = self.find_path(ppos, pos)
@@ -213,11 +220,16 @@ class GraphSokoban(gym.Env):
 			if tpath or np.all(ppos == pos): # if there is a path or we are in the right location already
 				_, r_tot, _, _ = self._execute(tpath)	 # move to position such that the block can be moved
 				s, r, d, i = self.env.step(a) 			 # push the block in the right direction
+				if RENDER:
+					self.env.render(mode='human')
+					time.sleep(0.2)
 				r_tot += r
 
 			else:
 				s, r_tot, d, i = self.env.step(0)		 # if it's not possible do noop
-		
+				if RENDER:
+					self.env.render(mode='human')
+					time.sleep(0.2)
 
 		i['elementary_steps'] = self.env.num_env_steps - el_steps_start
 

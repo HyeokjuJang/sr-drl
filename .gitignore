@@ -4,3 +4,5 @@ __pycache__
 wandb
 .sokoban_cache
 .vscode/
+best_models
+trace.pdf
