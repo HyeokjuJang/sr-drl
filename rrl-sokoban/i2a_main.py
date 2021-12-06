@@ -534,8 +534,8 @@ if __name__ == '__main__':
 
 	job_name = f'{config.soko_size[0]}x{config.soko_size[1]}-{config.soko_boxes} '\
 				f'mp-{config.mp_iterations} nn-{config.emb_size} b-{config.batch} '\
-				f'd_times-{config.distil_learn_alone} d_interval-{config.distil_learn_alone_interval} '\
-				f'id-{args.id}'
+				f'id-{args.id}' \
+				# f'd_times-{config.distil_learn_alone} d_interval-{config.distil_learn_alone_interval} '\
 	
 	debug = args.debug
 	if not debug:
