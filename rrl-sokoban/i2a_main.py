@@ -545,7 +545,7 @@ if __name__ == '__main__':
 	
 	debug = args.debug
 	if not debug:
-		wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config, dir=os.path.join(config.save_dir, job_name))
+		wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config, dir=config.save_dir)
 		wandb.save("*.pt")
 
 		wandb.watch(net, log='all')
