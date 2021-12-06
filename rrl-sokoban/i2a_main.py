@@ -668,7 +668,7 @@ if __name__ == '__main__':
 			# knowledge flow dependency loss
 			loss_dep = -torch.log(actor_critic.student_weight)/2
 			optimizer.zero_grad()
-			loss = loss - entropy + loss_dep
+			loss = loss - entropy + loss_dep * 0.001
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
@@ -680,7 +680,6 @@ if __name__ == '__main__':
 		# save step stats
 		tot_env_steps += config.batch
 		tot_el_env_steps += np.sum([x['elementary_steps'] for x in i])
-
 		tqdm_main.update()
 
 		if step % config.sched_lr_rate == 0:
@@ -748,7 +747,7 @@ if __name__ == '__main__':
 					'loss_h': loss_h,
 					'entropy estimate': entropy,
 					'gradient norm': norm,
-					'student_weight': actor_critic.student_weight,
+					'student_weight': actor_critic.student_weight - 0.0,
 					'teacher_weight': 1.0 - actor_critic.student_weight,
 
 					'lr': net.lr,
