@@ -69,6 +69,8 @@ class Object:
 
 		self.load_model = args.load_model
 
+		self.save_dir = args.save_dir
+
 		if args.custom:
 			x, y, boxes = map(int, args.custom.split('x'))
 

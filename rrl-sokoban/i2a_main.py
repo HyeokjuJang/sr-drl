@@ -60,7 +60,8 @@ def get_args():
 	parser.add_argument('-mp_iterations', type=int, default=10, help="Number of message passes")
 	parser.add_argument('-epoch', type=int, default=1000, help="Epoch length")
 	parser.add_argument('-eval_problems', type=int, default=1000, help="Epoch length")
-
+	parser.add_argument('-save_dir', type=str, default="~/dataset/sr-drl/models/", help="save log directory")
+	
 	parser.add_argument('-subset', type=int, default=None, help="Use a subset of train set")
 	parser.add_argument('--pos_feats', action='store_const', const=True, help="Enable positional features")
 	parser.add_argument('--custom', type=str, default=None, help="Custom size (e.g. 10x10x4; else Boxoban)")
@@ -80,6 +81,8 @@ def get_args():
                     help='connect to wandb')
 	parser.add_argument('--distillation', action='store_true',
                     help='work with distillation, or knowledge flow')
+	parser.add_argument('--distil_policy_equal_net', action='store_true',
+                    help='distill policy and net are the same model')
 	parser.add_argument('--d_alone', type=int, default=2,
                     help='distillation learn alone times in interval')
 	parser.add_argument('--d_interval', type=int, default=10,
@@ -501,7 +504,10 @@ if __name__ == '__main__':
 	
 	net = Net(inside_i2a=True, distillation=args.distillation)
 	target_net = Net(inside_i2a=True, distillation=args.distillation)
-	distil_policy = Net()
+	if args.distil_policy_equal_net:
+		distil_policy = net
+	else:
+		distil_policy = Net()
 	if args.distillation:
 		distil_target_policy = Net()
 
@@ -539,7 +545,7 @@ if __name__ == '__main__':
 	
 	debug = args.debug
 	if not debug:
-		wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config)
+		wandb.init(project="sokoban_i2a_sr-drl", name=job_name, config=config, dir=os.path.join(config.save_dir, job_name))
 		wandb.save("*.pt")
 
 		wandb.watch(net, log='all')
@@ -667,8 +673,9 @@ if __name__ == '__main__':
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
 
-			# copy actor_critic weights to distil_policy
-			distil_policy.copy_weights(actor_critic.net, rho=config.target_rho)
+			if not args.distil_policy_equal_net:
+				# copy actor_critic weights to distil_policy
+				distil_policy.copy_weights(actor_critic.net, rho=config.target_rho)
 
 		# save step stats
 		tot_env_steps += config.batch
