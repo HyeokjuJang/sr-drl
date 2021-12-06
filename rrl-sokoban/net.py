@@ -18,10 +18,10 @@ def segmented_sample(probs, splits):
     return torch.cat(samples)
 
 class Net(Module):
-    def __init__(self, inside_i2a=False):
+    def __init__(self, inside_i2a=False, distillation=False):
         super().__init__()
         self.inside_i2a = inside_i2a
-        if self.inside_i2a:
+        if self.inside_i2a and distillation:
             self.inside_i2a = 2
         else:
             self.inside_i2a = 1
@@ -68,6 +68,7 @@ class Net(Module):
             val_new   = rho * val_other + (1-rho) * val_self
 
             params_self[i].data.copy_(val_new)
+    
 
     def graph_embedding(self, s_batch):
         # convert to tensors

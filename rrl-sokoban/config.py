@@ -60,7 +60,7 @@ class Object:
 
 		self.max_epochs = args.max_epochs
 		self.log_rate = self.epoch
-		self.eval_problems = 1000
+		self.eval_problems = args.eval_problems
 		# self.eval_steps = 500
 		self.eval_batch = args.batch
 		

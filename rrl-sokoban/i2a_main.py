@@ -59,6 +59,7 @@ def get_args():
 	parser.add_argument('-max_epochs', type=int, default=None, help="Terminate after this many epochs")
 	parser.add_argument('-mp_iterations', type=int, default=10, help="Number of message passes")
 	parser.add_argument('-epoch', type=int, default=1000, help="Epoch length")
+	parser.add_argument('-eval_problems', type=int, default=1000, help="Epoch length")
 
 	parser.add_argument('-subset', type=int, default=None, help="Use a subset of train set")
 	parser.add_argument('--pos_feats', action='store_const', const=True, help="Enable positional features")
@@ -77,6 +78,8 @@ def get_args():
                     help='num of steps for update')
 	parser.add_argument('--debug', action='store_true',
                     help='connect to wandb')
+	parser.add_argument('--distillation', action='store_true',
+                    help='work with distillation, or knowledge flow')
 	parser.add_argument('--d_alone', type=int, default=2,
                     help='distillation learn alone times in interval')
 	parser.add_argument('--d_interval', type=int, default=10,
@@ -127,11 +130,14 @@ def evaluate(net, split='valid', subset=None):
 
 	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
 
-def evaluate_i2a(net, split='valid', subset=None):
+def evaluate_i2a(net, split='valid', subset=None, student_only=False):
 	tqdm_val = tqdm(desc='Validating', total=config.eval_problems, unit=' steps')
 	test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split=split, subset=subset) for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
 	tmp_env = net.envs
 	net.change_env(test_env)
+	if student_only:
+		tmp_student_weight = net.student_weight
+		net.student_weight = torch.tensor(1.0)
 	with torch.no_grad():
 		net.eval()
 
@@ -146,7 +152,7 @@ def evaluate_i2a(net, split='valid', subset=None):
 			state_as_frame = Variable(torch.tensor(net.envs.raw_state(), dtype=torch.float))
 			steps += 1
 			
-			a, n, v, pi, a_p, n_p = net(state_as_frame, s=s) # action, node, value, total_prob
+			a, n, v, pi, a_p, n_p, _ = net(state_as_frame, s=s) # action, node, value, total_prob
 			actions = to_action(a, n, s, size=config.soko_size)
 
 			s, r, d, i = net.envs.step(actions)
@@ -164,6 +170,8 @@ def evaluate_i2a(net, split='valid', subset=None):
 
 		net.train()
 	net.change_env(tmp_env)
+	if student_only:
+		net.student_weight = tmp_student_weight
 	tqdm_val.close()
 
 	return r_avg, problems_solved_ps, problems_solved_avg, problems_finished
@@ -207,7 +215,7 @@ def get_plotly(net, env, s, title=None, distil=True):
 
 	return fig, value, action_probs
 
-def debug_net(net, distil=True):
+def debug_net(net, distil=True, student_only=False):
 	test_env = gym.make('Sokograph-v0', split='valid')
 	# test_env = SubprocVecEnv([lambda: gym.make('Sokograph-v0', split='valid') for i in range(config.eval_batch)], in_series=(config.eval_batch // config.cpus), context='fork')
 	if distil:
@@ -216,6 +224,10 @@ def debug_net(net, distil=True):
 		tmp_env = net.envs
 		net.change_env(test_env)
 		s = net.envs.reset()
+	
+	if student_only:
+		tmp_student_weight = net.student_weight
+		net.student_weight = torch.tensor(1.0)
 
 	
 	with torch.no_grad():
@@ -225,6 +237,8 @@ def debug_net(net, distil=True):
 	
 	if not distil:
 		net.change_env(tmp_env)
+	if student_only:
+		net.student_weight = tmp_student_weight
 
 	if distil:
 		wandb.log({'net_debug': fig, 'value': value, 
@@ -287,7 +301,7 @@ def trace_i2a_net(net, net_name, steps=100):
 			imgs.append(fig.to_image(format='pdf'))
 
 			state_as_frame = Variable(torch.tensor([net.envs.raw_state()], dtype=torch.float))
-			a, n, v, pi, a_p, n_p = net(state_as_frame, s=[s])
+			a, n, v, pi, a_p, n_p, _ = net(state_as_frame, s=[s])
 			
 			actions = to_action(a, n, [s], size=config.soko_size)
 
@@ -485,11 +499,11 @@ if __name__ == '__main__':
 
 	torch.set_num_threads(config.cpus)	
 	
-	net = Net(inside_i2a=True)
-	target_net = Net(inside_i2a=True)
-
+	net = Net(inside_i2a=True, distillation=args.distillation)
+	target_net = Net(inside_i2a=True, distillation=args.distillation)
 	distil_policy = Net()
-	distil_target_policy = Net()
+	if args.distillation:
+		distil_target_policy = Net()
 
 	if config.load_model:
 		distil_policy.load(os.path.join(config.load_model, "files", "model_distil.pt"))
@@ -545,7 +559,7 @@ if __name__ == '__main__':
 	env_model.load_state_dict(torch.load("env_model_sokoban"))
 
 	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
-	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs)
+	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs, args.distillation)
 	
 	# rmsprop hyperparams:
 	lr = 7e-4
@@ -555,7 +569,8 @@ if __name__ == '__main__':
 	# optimizer = optim.RMSprop(actor_critic.parameters(), lr, eps=eps, alpha=alpha)
 	# adam:
 	optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
-	distil_optimizer = distil_policy.opt
+	if args.distillation:
+		distil_optimizer = distil_policy.opt
 
 	if USE_CUDA:
 		env_model = env_model.cuda()
@@ -563,7 +578,8 @@ if __name__ == '__main__':
 		target_net = target_net.cuda()
 		actor_critic = actor_critic.cuda()
 		distil_policy = distil_policy.cuda()
-		distil_target_policy = distil_target_policy.cuda()
+		if args.distillation:
+			distil_target_policy = distil_target_policy.cuda()
 	gamma = 0.99
 	entropy_coef = 0.01
 	value_loss_coef = 0.5
@@ -590,13 +606,13 @@ if __name__ == '__main__':
 	torch.autograd.set_detect_anomaly(True)
 	for step in itertools.count(start=1):
 		
-		a, n, v, pi, a_p, n_p = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
+		a, n, v, pi, a_p, n_p, imag_core_input = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
 		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
 		
 		# draw graph
 		# make_dot(distil_policy(s), params=dict(distil_policy.named_parameters())).render("graph", format="png")
 
-		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
+		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone and args.distillation:
 			actions = to_action(a_d, n_d, s, size=config.soko_size)
 		else:
 			actions = to_action(a, n, s, size=config.soko_size)
@@ -608,37 +624,51 @@ if __name__ == '__main__':
 		d_true = [x['d_true'] for x in i]
 		state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 		# update network
-		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
-			loss, loss_pi, loss_v, loss_h, entropy = distil_policy.update(r, v_d, pi_d, s_true, d_true, distil_target_policy)
-			distil_target_policy.copy_weights(distil_policy, rho=config.target_rho)
-			distil_optimizer.zero_grad()
-			loss.backward()
-			distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
+		if args.distillation:
+			if (step % config.distil_learn_alone_interval) < config.distil_learn_alone:
+				loss, loss_pi, loss_v, loss_h, entropy = distil_policy.update(r, v_d, pi_d, s_true, d_true, distil_target_policy)
+				distil_target_policy.copy_weights(distil_policy, rho=config.target_rho)
+				distil_optimizer.zero_grad()
+				loss.backward()
+				distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
 
-			distil_optimizer.step()
+				distil_optimizer.step()
+			else:
+				loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
+				target_net.copy_weights(net, rho=config.target_rho)
+		
+				# distillation
+				distil_loss_action = F.kl_div(F.log_softmax(a_p_d + 1e-5, dim=1), F.softmax(a_p + 1e-9, dim=1).detach())
+				distil_loss_node = F.kl_div(F.log_softmax(n_p_d + 1e-5, dim=1), F.softmax(n_p + 1e-9, dim=1).detach()) 
+				distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
+				distil_loss_value = F.mse_loss(v.detach(), v_d)
+				# distil_loss_entropy = (torch.log(a_p_d + 1e-5).mean() + torch.log(n_p_d + 1e-5).mean()) * entropy_coef
+				distil_loss_entropy = (torch.log(pi_d) + 1e-5).mean() * entropy_coef
+				optimizer.zero_grad()
+				loss = loss - entropy
+				loss.backward()
+				norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
+				optimizer.step()
+				
+				distil_optimizer.zero_grad()
+				distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi + distil_loss_entropy
+				distil_loss.backward()
+				distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
+
+				distil_optimizer.step()
 		else:
-			loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer)
+			loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer, x=imag_core_input)
 			target_net.copy_weights(net, rho=config.target_rho)
-	
-			# distillation
-			distil_loss_action = F.kl_div(F.log_softmax(a_p_d + 1e-5, dim=1), F.softmax(a_p + 1e-9, dim=1).detach())
-			distil_loss_node = F.kl_div(F.log_softmax(n_p_d + 1e-5, dim=1), F.softmax(n_p + 1e-9, dim=1).detach()) 
-			distil_loss_pi = F.kl_div(torch.log(pi_d), pi.detach())
-			distil_loss_value = F.mse_loss(v.detach(), v_d)
-			# distil_loss_entropy = (torch.log(a_p_d + 1e-5).mean() + torch.log(n_p_d + 1e-5).mean()) * entropy_coef
-			distil_loss_entropy = (torch.log(pi_d) + 1e-5).mean() * entropy_coef
+			# knowledge flow dependency loss
+			loss_dep = -torch.log(actor_critic.student_weight)/2
 			optimizer.zero_grad()
-			loss = loss - entropy
+			loss = loss - entropy + loss_dep
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
-			
-			distil_optimizer.zero_grad()
-			distil_loss = distil_loss_action + distil_loss_node + distil_loss_value + distil_loss_pi + distil_loss_entropy
-			distil_loss.backward()
-			distil_grad_norm = torch.nn.utils.clip_grad_norm_(distil_policy.parameters(), max_grad_norm)
 
-			distil_optimizer.step()
+			# copy actor_critic weights to distil_policy
+			distil_policy.copy_weights(actor_critic.net, rho=config.target_rho)
 
 		# save step stats
 		tot_env_steps += config.batch
@@ -660,45 +690,75 @@ if __name__ == '__main__':
 			r_avg, s_ps_avg, s_avg, _ = evaluate(distil_policy)
 			r_avg_trn, s_ps_avg_trn, s_avg_trn, _ = evaluate(distil_policy, split='train', subset=config.subset)
 			debug_net(distil_policy)
-
+			
 			r_avg_i2a, s_ps_avg_i2a, s_avg_i2a, _ = evaluate_i2a(actor_critic)
 			debug_net(actor_critic, distil=False)
-			
-			log = {
-				'env_steps': tot_env_steps,
-				'el_env_steps': tot_el_env_steps,
+			if args.distillation:
+				log = {
+					'env_steps': tot_env_steps,
+					'el_env_steps': tot_el_env_steps,
 
-				'rate': tqdm_main.format_dict['rate'],
-				'loss': loss,
-				'loss_pi': loss_pi,
-				'loss_v': loss_v,
-				'loss_h': loss_h,
-				'distil_node_loss': distil_loss_action,
-				'distil_action_loss': distil_loss_node,
-				'distil_value_loss': distil_loss_value,
-				'distil_pi_loss': distil_loss_pi,
-				'distil_loss': distil_loss,
-				'entropy estimate': entropy,
-				'gradient norm': norm,
-				'distil_gradient_norm': distil_grad_norm,
+					'rate': tqdm_main.format_dict['rate'],
+					'loss': loss,
+					'loss_pi': loss_pi,
+					'loss_v': loss_v,
+					'loss_h': loss_h,
+					'distil_node_loss': distil_loss_action,
+					'distil_action_loss': distil_loss_node,
+					'distil_value_loss': distil_loss_value,
+					'distil_pi_loss': distil_loss_pi,
+					'distil_loss': distil_loss,
+					'entropy estimate': entropy,
+					'gradient norm': norm,
+					'distil_gradient_norm': distil_grad_norm,
 
-				'distil_value': v_d.mean(),
+					'distil_value': v_d.mean(),
 
-				'lr': net.lr,
-				'alpha_h': net.alpha_h,
+					'lr': net.lr,
+					'alpha_h': net.alpha_h,
 
-				'reward_avg': r_avg,
-				'solved_per_step': s_ps_avg,
-				'solved_avg': s_avg,
+					'reward_avg': r_avg,
+					'solved_per_step': s_ps_avg,
+					'solved_avg': s_avg,
 
-				'reward_avg_i2a': r_avg_i2a,
-				'solved_per_step_i2a': s_ps_avg_i2a,
-				'solved_avg_i2a': s_avg_i2a,
+					'reward_avg_i2a': r_avg_i2a,
+					'solved_per_step_i2a': s_ps_avg_i2a,
+					'solved_avg_i2a': s_avg_i2a,
 
-				'reward_avg_train': r_avg_trn,
-				'solved_per_step_train': s_ps_avg_trn,
-				'solved_avg_train': s_avg_trn
-			}
+					'reward_avg_train': r_avg_trn,
+					'solved_per_step_train': s_ps_avg_trn,
+					'solved_avg_train': s_avg_trn
+				}
+			else:
+				log = {
+					'env_steps': tot_env_steps,
+					'el_env_steps': tot_el_env_steps,
+
+					'rate': tqdm_main.format_dict['rate'],
+					'loss': loss,
+					'loss_pi': loss_pi,
+					'loss_v': loss_v,
+					'loss_h': loss_h,
+					'entropy estimate': entropy,
+					'gradient norm': norm,
+					'student_weight': actor_critic.student_weight,
+					'teacher_weight': 1.0 - actor_critic.student_weight,
+
+					'lr': net.lr,
+					'alpha_h': net.alpha_h,
+
+					'reward_avg': r_avg,
+					'solved_per_step': s_ps_avg,
+					'solved_avg': s_avg,
+
+					'reward_avg_i2a': r_avg_i2a,
+					'solved_per_step_i2a': s_ps_avg_i2a,
+					'solved_avg_i2a': s_avg_i2a,
+
+					'reward_avg_train': r_avg_trn,
+					'solved_per_step_train': s_ps_avg_trn,
+					'solved_avg_train': s_avg_trn
+				}
 
 			print(log)
 			wandb.log(log)
