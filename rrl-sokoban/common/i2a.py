@@ -78,7 +78,7 @@ class I2A(OnPolicy):
                 nn.Linear(self.feature_size(), emb_size),
                 nn.ReLU(),
             )
-        self.student_weight = Variable(torch.tensor(0.5))
+        self.student_weight = nn.Parameter(0.5 * torch.ones(1))
 
     def forward(self, state, s=None, complete=False):
         batch_size = state.shape[0]
