@@ -87,6 +87,8 @@ def get_args():
                     help='distillation learn alone times in interval')
 	parser.add_argument('--d_interval', type=int, default=10,
                     help='distillation learn alone interval')
+	parser.add_argument('--sched_dep_step', type=int, default=5000,
+                    help='start to reduce env model portion')
 
 	cmd_args = parser.parse_args()
 
@@ -668,7 +670,9 @@ if __name__ == '__main__':
 			# knowledge flow dependency loss
 			loss_dep = -torch.log(actor_critic.student_weight)/2
 			optimizer.zero_grad()
-			loss = loss - entropy + loss_dep * 0.001
+			loss = loss - entropy
+			if step > config.sched_dep_step == 0:
+				loss = loss + loss_dep * 0.001
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
@@ -747,8 +751,8 @@ if __name__ == '__main__':
 					'loss_h': loss_h,
 					'entropy estimate': entropy,
 					'gradient norm': norm,
-					'student_weight': actor_critic.student_weight - 0.0,
-					'teacher_weight': 1.0 - actor_critic.student_weight,
+					'student_weight': actor_critic.s_h_portion[0],
+					'teacher_weight': actor_critic.s_h_portion[1],
 
 					'lr': net.lr,
 					'alpha_h': net.alpha_h,

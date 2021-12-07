@@ -70,6 +70,7 @@ class Object:
 		self.load_model = args.load_model
 
 		self.save_dir = args.save_dir
+		self.sched_dep_step = args.sched_dep_step
 
 		if args.custom:
 			x, y, boxes = map(int, args.custom.split('x'))

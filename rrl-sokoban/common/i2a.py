@@ -79,6 +79,7 @@ class I2A(OnPolicy):
                 nn.ReLU(),
             )
         self.student_weight = nn.Parameter(0.5 * torch.ones(1))
+        self.s_h_portion = nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
 
     def forward(self, state, s=None, complete=False):
         batch_size = state.shape[0]
@@ -100,7 +101,8 @@ class I2A(OnPolicy):
         if self.distillation:
             x = torch.cat([state, hidden], 1)
         else:
-            x = torch.add(state * self.student_weight, hidden * (1 - self.student_weight))
+            self.s_h_portion = nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
+            x = state * self.s_h_portion[0] + hidden * self.s_h_portion[1]
         x = self.fc(x)
         
         if complete:
