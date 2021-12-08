@@ -671,7 +671,7 @@ if __name__ == '__main__':
 			loss_dep = -torch.log(actor_critic.student_weight)/2
 			optimizer.zero_grad()
 			loss = loss - entropy
-			if step > config.sched_dep_step == 0:
+			if step > config.sched_dep_step:
 				loss = loss + loss_dep * 0.001
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
