@@ -45,7 +45,7 @@ class RolloutEncoder(nn.Module):
         return self.features(autograd.Variable(torch.zeros(1, *self.in_shape))).view(1, -1).size(1)
 
 class I2A(OnPolicy):
-    def __init__(self, in_shape, hidden_size, net, target_net, imagination, emb_size, envs, distillation=True):
+    def __init__(self, in_shape, hidden_size, net, target_net, imagination, emb_size, envs, distillation=True, student_init_portion=0.5):
         super(I2A, self).__init__()
         
         self.in_shape      = in_shape
@@ -78,7 +78,7 @@ class I2A(OnPolicy):
                 nn.Linear(self.feature_size(), emb_size),
                 nn.ReLU(),
             )
-        self.student_weight = nn.Parameter(0.5 * torch.ones(1))
+        self.student_weight = nn.Parameter(student_init_portion * torch.ones(1))
         self.s_h_portion = nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
 
     def forward(self, state, s=None, complete=False):

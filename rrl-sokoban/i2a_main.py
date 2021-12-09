@@ -89,8 +89,10 @@ def get_args():
                     help='distillation learn alone interval')
 	parser.add_argument('--sched_dep_step', type=int, default=5000,
                     help='start to reduce env model portion')
-	parser.add_argument('--lambda_1_max', type=float, default=0.001)
-	parser.add_argument('--teacher_init_portion', type=float, default=0.5)
+	parser.add_argument('--lambda_1_max', type=float, default=0.001,
+					help='max value of lambda_1')
+	parser.add_argument('--student_init_portion', type=float, default=0.5,
+					help='student init portion on actor critic')
 
 	cmd_args = parser.parse_args()
 
@@ -569,7 +571,7 @@ if __name__ == '__main__':
 	env_model.load_state_dict(torch.load("env_model_sokoban"))
 
 	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
-	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs, args.distillation)
+	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs, args.distillation, student_init_portion = args.student_init_portion)
 	
 	# rmsprop hyperparams:
 	lr = 7e-4
@@ -614,8 +616,6 @@ if __name__ == '__main__':
 	s = envs.reset()
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 	torch.autograd.set_detect_anomaly(True)
-
-	actor_critic.student_weight = args.teacher_init_portion
 
 	for step in itertools.count(start=1):
 		
