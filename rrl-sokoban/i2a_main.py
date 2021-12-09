@@ -81,14 +81,15 @@ def get_args():
                     help='connect to wandb')
 	parser.add_argument('--distillation', action='store_true',
                     help='work with distillation, or knowledge flow')
-	parser.add_argument('--distil_policy_equal_net', action='store_true',
-                    help='distill policy and net are the same model')
+	parser.add_argument('--distil_policy_not_equal_net', action='store_true',
+                    help='distill policy and net are not the same model')
 	parser.add_argument('--d_alone', type=int, default=2,
                     help='distillation learn alone times in interval')
 	parser.add_argument('--d_interval', type=int, default=10,
                     help='distillation learn alone interval')
 	parser.add_argument('--sched_dep_step', type=int, default=5000,
                     help='start to reduce env model portion')
+	parser.add_argument('--lambda_1_max', type=float, default=0.001)
 
 	cmd_args = parser.parse_args()
 
@@ -506,10 +507,10 @@ if __name__ == '__main__':
 	
 	net = Net(inside_i2a=True, distillation=args.distillation)
 	target_net = Net(inside_i2a=True, distillation=args.distillation)
-	if args.distil_policy_equal_net:
-		distil_policy = net
-	else:
+	if args.distil_policy_not_equal_net:
 		distil_policy = Net()
+	else:
+		distil_policy = net
 	if args.distillation:
 		distil_target_policy = Net()
 
@@ -671,13 +672,17 @@ if __name__ == '__main__':
 			loss_dep = -torch.log(actor_critic.student_weight)/2
 			optimizer.zero_grad()
 			loss = loss - entropy
+			
 			if step > config.sched_dep_step:
-				loss = loss + loss_dep * 0.001
+				lambda_1 = args.lambda_1_max
+			else:
+				lambda_1 = step / config.sched_dep_step * args.lambda_1_max
+			loss = loss + loss_dep * lambda_1
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
 
-			if not args.distil_policy_equal_net:
+			if args.distil_policy_not_equal_net:
 				# copy actor_critic weights to distil_policy
 				distil_policy.copy_weights(actor_critic.net, rho=config.target_rho)
 
