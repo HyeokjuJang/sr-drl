@@ -90,6 +90,7 @@ def get_args():
 	parser.add_argument('--sched_dep_step', type=int, default=5000,
                     help='start to reduce env model portion')
 	parser.add_argument('--lambda_1_max', type=float, default=0.001)
+	parser.add_argument('--teacher_init_portion', type=float, default=0.5)
 
 	cmd_args = parser.parse_args()
 
@@ -613,6 +614,9 @@ if __name__ == '__main__':
 	s = envs.reset()
 	state_as_frame = Variable(torch.tensor(envs.raw_state(), dtype=torch.float))
 	torch.autograd.set_detect_anomaly(True)
+
+	actor_critic.student_weight = args.teacher_init_portion
+
 	for step in itertools.count(start=1):
 		
 		a, n, v, pi, a_p, n_p, imag_core_input = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
