@@ -87,9 +87,9 @@ def get_args():
                     help='distillation learn alone times in interval')
 	parser.add_argument('--d_interval', type=int, default=10,
                     help='distillation learn alone interval')
-	parser.add_argument('--sched_dep_step', type=int, default=5000,
+	parser.add_argument('--sched_dep_step', type=int, default=50000,
                     help='start to reduce env model portion')
-	parser.add_argument('--lambda_1_max', type=float, default=0.001,
+	parser.add_argument('--lambda_1_max', type=float, default=0.05,
 					help='max value of lambda_1')
 	parser.add_argument('--student_init_portion', type=float, default=0.5,
 					help='student init portion on actor critic')
@@ -762,6 +762,7 @@ if __name__ == '__main__':
 					'gradient norm': norm,
 					'student_weight': net.s_h_portion[0],
 					'teacher_weight': net.s_h_portion[1],
+					'lambda_1': lambda_1,
 
 					'lr': net.lr,
 					'alpha_h': net.alpha_h,

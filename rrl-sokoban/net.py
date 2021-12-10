@@ -20,8 +20,7 @@ def segmented_sample(probs, splits):
 class Net(Module):
     def __init__(self, inside_i2a=False, distillation=False, student_init_portion=0.5):
         super().__init__()
-        self.inside_i2a = inside_i2a
-        if self.inside_i2a and distillation:
+        if inside_i2a and distillation:
             self.inside_i2a = 2
         else:
             self.inside_i2a = 1
