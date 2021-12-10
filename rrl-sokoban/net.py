@@ -111,7 +111,7 @@ class Net(Module):
         # if inside_i2a then make concat tensor with imag_core_input
         if self.inside_i2a == 2 and imag_core_input != None:
             xg = torch.cat((xg, imag_core_input), dim=1)
-        elif self.inside_i2a == 1 and imag_core_input != None and self.student_weight != 0.0:
+        elif self.inside_i2a == 1 and imag_core_input != None and self.student_weight != 1.0:
             self.s_h_portion = torch.nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]), dim=0)
             xg = self.s_h_portion[0] * xg + self.s_h_portion[1] * imag_core_input
         # compute value function
