@@ -18,7 +18,7 @@ def segmented_sample(probs, splits):
     return torch.cat(samples)
 
 class Net(Module):
-    def __init__(self, inside_i2a=False, distillation=False):
+    def __init__(self, inside_i2a=False, distillation=False, student_init_portion=0.5):
         super().__init__()
         self.inside_i2a = inside_i2a
         if self.inside_i2a and distillation:
@@ -44,6 +44,10 @@ class Net(Module):
 
         self.lr = config.opt_lr
         self.alpha_h = config.alpha_h
+
+        self.student_weight = torch.nn.Parameter(student_init_portion * torch.ones(1))
+        self.s_h_portion = torch.nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
+
 
     def save(self, file='model.pt'):
         torch.save(self.state_dict(), file)
@@ -107,6 +111,9 @@ class Net(Module):
         # if inside_i2a then make concat tensor with imag_core_input
         if self.inside_i2a == 2 and imag_core_input != None:
             xg = torch.cat((xg, imag_core_input), dim=1)
+        elif self.inside_i2a == 1 and imag_core_input != None and self.student_weight != 0.0:
+            self.s_h_portion = torch.nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]), dim=0)
+            xg = self.s_h_portion[0] * xg + self.s_h_portion[1] * imag_core_input
         # compute value function
         value = self.value_function(xg)
 

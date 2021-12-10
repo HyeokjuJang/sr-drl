@@ -45,7 +45,7 @@ class RolloutEncoder(nn.Module):
         return self.features(autograd.Variable(torch.zeros(1, *self.in_shape))).view(1, -1).size(1)
 
 class I2A(OnPolicy):
-    def __init__(self, in_shape, hidden_size, net, target_net, imagination, emb_size, envs, distillation=True, student_init_portion=0.5):
+    def __init__(self, in_shape, hidden_size, net, target_net, imagination, emb_size, envs, distillation=True):
         super(I2A, self).__init__()
         
         self.in_shape      = in_shape
@@ -68,19 +68,11 @@ class I2A(OnPolicy):
         
         self.encoder = RolloutEncoder(in_shape, 1, hidden_size)
         self.distillation = distillation
-        if self.distillation:
-            self.fc = nn.Sequential(
-                nn.Linear(self.feature_size() + hidden_size, emb_size),
-                nn.ReLU(),
-            )
-        else:
-            self.fc = nn.Sequential(
-                nn.Linear(self.feature_size(), emb_size),
-                nn.ReLU(),
-            )
-        self.student_weight = nn.Parameter(student_init_portion * torch.ones(1))
-        self.s_h_portion = nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
-
+        self.fc = nn.Sequential(
+            nn.Linear(self.feature_size() + hidden_size, emb_size),
+            nn.ReLU(),
+        )
+        
     def forward(self, state, s=None, complete=False):
         batch_size = state.shape[0]
         state_np = state.data.cpu().numpy()
@@ -89,7 +81,6 @@ class I2A(OnPolicy):
         else:
             graph_state = self.envs.to_graph(state_np)
         
-
         imagined_state, imagined_reward = self.imagination(state_np)
         hidden = self.encoder(Variable(imagined_state), Variable(imagined_reward))
         hidden = hidden.view(batch_size, -1)
@@ -97,12 +88,8 @@ class I2A(OnPolicy):
         state = self.features(state)
         state = state.view(state.size(0), -1)
         
-        # before knowledge flow version, just concatenate it
-        if self.distillation:
-            x = torch.cat([state, hidden], 1)
-        else:
-            self.s_h_portion = nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
-            x = state * self.s_h_portion[0] + hidden * self.s_h_portion[1]
+        x = torch.cat([state, hidden], 1)
+
         x = self.fc(x)
         
         if complete:

@@ -508,8 +508,8 @@ if __name__ == '__main__':
 
 	torch.set_num_threads(config.cpus)	
 	
-	net = Net(inside_i2a=True, distillation=args.distillation)
-	target_net = Net(inside_i2a=True, distillation=args.distillation)
+	net = Net(inside_i2a=True, distillation=args.distillation, student_init_portion=args.student_init_portion)
+	target_net = Net(inside_i2a=True, distillation=args.distillation, student_init_portion=args.student_init_portion)
 	if args.distil_policy_not_equal_net:
 		distil_policy = Net()
 	else:
@@ -571,7 +571,7 @@ if __name__ == '__main__':
 	env_model.load_state_dict(torch.load("env_model_sokoban"))
 
 	imagination = ImaginationCore(args.num_rollouts, state_shape, env_model, distil_policy, config.soko_size, input_state, envs)
-	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs, args.distillation, student_init_portion = args.student_init_portion)
+	actor_critic = I2A(state_shape, 256, net, target_net, imagination, config.emb_size, envs, args.distillation)
 	
 	# rmsprop hyperparams:
 	lr = 7e-4
@@ -673,7 +673,7 @@ if __name__ == '__main__':
 			loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer, x=imag_core_input)
 			target_net.copy_weights(net, rho=config.target_rho)
 			# knowledge flow dependency loss
-			loss_dep = -torch.log(actor_critic.student_weight)/2
+			loss_dep = -torch.log(net.s_h_portion[0] + 1e-8)/2
 			optimizer.zero_grad()
 			loss = loss - entropy
 			
@@ -760,8 +760,8 @@ if __name__ == '__main__':
 					'loss_h': loss_h,
 					'entropy estimate': entropy,
 					'gradient norm': norm,
-					'student_weight': actor_critic.s_h_portion[0],
-					'teacher_weight': actor_critic.s_h_portion[1],
+					'student_weight': net.s_h_portion[0],
+					'teacher_weight': net.s_h_portion[1],
 
 					'lr': net.lr,
 					'alpha_h': net.alpha_h,
