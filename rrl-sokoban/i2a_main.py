@@ -685,7 +685,8 @@ if __name__ == '__main__':
 				lambda_1 = args.lambda_1_max
 			else:
 				lambda_1 = step / config.sched_dep_step * args.lambda_1_max
-			loss = loss + loss_dep * lambda_1
+			if lambda_1 != 0:
+				loss = loss + loss_dep * lambda_1
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
