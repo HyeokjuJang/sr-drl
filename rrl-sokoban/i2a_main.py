@@ -10,7 +10,7 @@ from vec_env.subproc_vec_env import SubprocVecEnv
 from net import Net
 from tqdm import tqdm
 
-# from torchviz import make_dot
+from torchviz import make_dot
 
 from config import config
 
@@ -78,7 +78,9 @@ def get_args():
 	parser.add_argument('--num_steps', type=int, default=32,
                     help='num of steps for update')
 	parser.add_argument('--debug', action='store_true',
-                    help='connect to wandb')
+                    help='do not connect to wandb')
+	parser.add_argument('--draw_graph', action='store_true',
+                    help='draw graph png')
 	parser.add_argument('--distillation', action='store_true',
                     help='work with distillation, or knowledge flow')
 	parser.add_argument('--distil_policy_not_equal_net', action='store_true',
@@ -623,7 +625,9 @@ if __name__ == '__main__':
 		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
 		
 		# draw graph
-		# make_dot(distil_policy(s), params=dict(distil_policy.named_parameters())).render("graph", format="png")
+		if args.draw_graph:
+			make_dot(v, params=dict(actor_critic.named_parameters())).render("ac_graph", format="png")
+			make_dot(v_d, params=dict(distil_policy.named_parameters())).render("distil_graph", format="png")
 
 		if (step % config.distil_learn_alone_interval) < config.distil_learn_alone and args.distillation:
 			actions = to_action(a_d, n_d, s, size=config.soko_size)
@@ -673,7 +677,7 @@ if __name__ == '__main__':
 			loss, loss_pi, loss_v, loss_h, entropy, logit = actor_critic.update(r, v, pi, s_true, d_true, state_as_frame, target_net, optimizer, x=imag_core_input)
 			target_net.copy_weights(net, rho=config.target_rho)
 			# knowledge flow dependency loss
-			loss_dep = -torch.log(net.s_h_portion[0] + 1e-8)/2
+			loss_dep = -torch.log(actor_critic.net.s_h_portion[0] + 1e-5)/2
 			optimizer.zero_grad()
 			loss = loss - entropy
 			
@@ -760,8 +764,8 @@ if __name__ == '__main__':
 					'loss_h': loss_h,
 					'entropy estimate': entropy,
 					'gradient norm': norm,
-					'student_weight': net.s_h_portion[0],
-					'teacher_weight': net.s_h_portion[1],
+					'student_weight': actor_critic.net.s_h_portion[0],
+					'teacher_weight': actor_critic.net.s_h_portion[1],
 					'lambda_1': lambda_1,
 
 					'lr': net.lr,

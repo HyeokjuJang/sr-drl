@@ -20,6 +20,9 @@ def segmented_sample(probs, splits):
 class Net(Module):
     def __init__(self, inside_i2a=False, distillation=False, student_init_portion=0.5):
         super().__init__()
+
+        self.device = torch.device(config.device)
+
         if inside_i2a and distillation:
             self.inside_i2a = 2
         else:
@@ -33,20 +36,17 @@ class Net(Module):
         self.action_select = Linear(config.emb_size * self.inside_i2a, 5)  # global features -> 5 actions
         self.value_function = Linear(config.emb_size * self.inside_i2a, 1) # global features -> state value
 
-        self.opt = torch.optim.AdamW(self.parameters(), lr=config.opt_lr, weight_decay=config.opt_l2)
-
-        self.device = torch.device(config.device)
-        self.to(self.device)
-
         # auxiliary variables
         # self.one_hot = torch.eye(5).to(self.device)
 
         self.lr = config.opt_lr
         self.alpha_h = config.alpha_h
 
-        self.student_weight = torch.nn.Parameter(student_init_portion * torch.ones(1))
-        self.s_h_portion = torch.nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]))
+        self.student_weight = torch.nn.Parameter(torch.tensor([student_init_portion, 1-student_init_portion], requires_grad=True, device=self.device))
+        self.s_h_portion = torch.nn.functional.softmax(self.student_weight, dim=0)
 
+        self.opt = torch.optim.AdamW(self.parameters(), lr=config.opt_lr, weight_decay=config.opt_l2)
+        self.to(self.device)
 
     def save(self, file='model.pt'):
         torch.save(self.state_dict(), file)
@@ -110,9 +110,10 @@ class Net(Module):
         # if inside_i2a then make concat tensor with imag_core_input
         if self.inside_i2a == 2 and imag_core_input != None:
             xg = torch.cat((xg, imag_core_input), dim=1)
-        elif self.inside_i2a == 1 and imag_core_input != None and self.student_weight != 1.0:
-            self.s_h_portion = torch.nn.functional.softmax(torch.tensor([self.student_weight, (1 - self.student_weight)]), dim=0)
+        elif self.inside_i2a == 1 and imag_core_input != None and self.student_weight[0] != 1.0:
+            self.s_h_portion = torch.nn.functional.softmax(self.student_weight, dim=0)
             xg = self.s_h_portion[0] * xg + self.s_h_portion[1] * imag_core_input
+
         # compute value function
         value = self.value_function(xg)
 
