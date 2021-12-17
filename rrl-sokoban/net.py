@@ -113,7 +113,7 @@ class Net(Module):
         elif self.inside_i2a == 1 and imag_core_input != None and self.student_weight[0] != 1.0:
             self.s_h_portion = torch.nn.functional.softmax(self.student_weight, dim=0)
             xg = self.s_h_portion[0] * xg + self.s_h_portion[1] * imag_core_input
-
+            print("student_weight: ", self.student_weight)
         # compute value function
         value = self.value_function(xg)
 
