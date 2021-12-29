@@ -114,12 +114,8 @@ class I2A(OnPolicy):
             
             state = self.features(state)
             state = state.view(state.size(0), -1)
-            # before knowledge flow version, just concatenate it
-            if self.distillation:
-                x = torch.cat([state, hidden], 1)
-            else:
-                x = torch.add(state * self.student_weight, hidden * (1 - self.student_weight))
             
+            x = torch.cat([state, hidden], 1)
             x = self.fc(x)
         
         done = torch.tensor(done, dtype=torch.float32, device=self.net.device).view(-1, 1)

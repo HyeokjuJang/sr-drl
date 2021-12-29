@@ -91,10 +91,13 @@ def get_args():
                     help='distillation learn alone interval')
 	parser.add_argument('--sched_dep_step', type=int, default=50000,
                     help='start to reduce env model portion')
-	parser.add_argument('--lambda_1_max', type=float, default=0.05,
+	parser.add_argument('--lambda_1_max', type=float, default=0.005,
 					help='max value of lambda_1')
 	parser.add_argument('--student_init_portion', type=float, default=0.5,
 					help='student init portion on actor critic')
+	parser.add_argument('--distil_rho', type=float, default=1.0,
+					help='distil policy copy rate')
+					
 
 	cmd_args = parser.parse_args()
 
@@ -622,7 +625,8 @@ if __name__ == '__main__':
 	for step in itertools.count(start=1):
 		
 		a, n, v, pi, a_p, n_p, imag_core_input = actor_critic(state_as_frame, s=s) # action, node, value, total_prob
-		a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
+		if args.distillation:
+			a_d, n_d, v_d, pi_d, a_p_d, n_p_d = distil_policy(s)
 		
 		# draw graph
 		if args.draw_graph:
@@ -680,20 +684,22 @@ if __name__ == '__main__':
 			loss_dep = -torch.log(actor_critic.net.s_h_portion[0] + 1e-5)/2
 			optimizer.zero_grad()
 			loss = loss - entropy
-			
+
 			if step > config.sched_dep_step:
 				lambda_1 = args.lambda_1_max
 			else:
 				lambda_1 = step / config.sched_dep_step * args.lambda_1_max
+
 			if lambda_1 != 0:
-				loss = loss + loss_dep * lambda_1
+				loss = loss + loss_dep * lambda_1 
+
 			loss.backward()
 			norm = torch.nn.utils.clip_grad_norm_(actor_critic.parameters(), config.opt_max_norm)
 			optimizer.step()
 
 			if args.distil_policy_not_equal_net:
 				# copy actor_critic weights to distil_policy
-				distil_policy.copy_weights(actor_critic.net, rho=config.target_rho)
+				distil_policy.copy_weights(actor_critic.net, rho=config.distil_rho)
 
 		# save step stats
 		tot_env_steps += config.batch

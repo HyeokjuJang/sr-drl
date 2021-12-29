@@ -34,6 +34,7 @@ class Object:
 		self.alpha_h = 0.2
 
 		self.target_rho = 0.005
+		self.distil_rho = args.distil_rho
 		self.emb_size = 64
 		self.mp_iterations = args.mp_iterations
 
