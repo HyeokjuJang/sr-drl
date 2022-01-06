@@ -683,7 +683,7 @@ if __name__ == '__main__':
 			# knowledge flow dependency loss
 			loss_dep = -torch.log(actor_critic.net.s_h_portion[0] + 1e-5)/2
 			optimizer.zero_grad()
-			loss = loss - entropy
+			# loss = loss - entropy
 
 			if step > config.sched_dep_step:
 				lambda_1 = args.lambda_1_max
